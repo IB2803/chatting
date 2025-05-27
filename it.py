@@ -17,7 +17,7 @@ from PyQt5.QtGui import QColor, QFont, QPainter, QBrush, QPalette, QPixmap, QIco
 os.environ['QT_LOGGING_RULES'] = 'qt.qpa.fonts=false'
 
 # BASE_URL = "http://localhost:5000"
-BASE_URL = "http://192.168.128.125:5000"  # Ganti <IP_KANTOR> dengan IP server
+BASE_URL = "http://192.168.47.135:5000"  # Ganti <IP_KANTOR> dengan IP server
 
 class WebSocketThread(threading.Thread):
     def __init__(self, chat_window):
@@ -26,7 +26,7 @@ class WebSocketThread(threading.Thread):
         self.running = True
         
     def run(self):
-        ws = create_connection("ws://192.168.128.125:5000")
+        ws = create_connection("ws://192.168.47.135:5000")
         # ws = create_connection(f"ws://{BASE_URL.split('//')[1]}")
         while self.running:
             try:
@@ -160,14 +160,14 @@ class ConversationItem(QWidget):
         info_layout.addLayout(name_status_layout)
         
         # Last message preview (if available)
-        preview_label = QLabel("Click to start conversation")
-        preview_label.setStyleSheet("""
+        self.preview_label = QLabel("Click to start conversation")
+        self.preview_label.setStyleSheet("""
             QLabel {
                 color: #7F8C8D;
                 font-size: 13px;
             }
         """)
-        info_layout.addWidget(preview_label)
+        info_layout.addWidget(self.preview_label)
         
         layout.addLayout(info_layout)
         self.setLayout(layout)
@@ -193,15 +193,19 @@ class ChatWindow(QWidget):
         self.setup_ui()
         self.load_conversations()
         
+        self.unread_map = {} 
+        
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.refresh_messages)
+        self.timer.start(3000)
+        
         # Setup WebSocket
         self.receive_message_signal.connect(self.handle_received_message)
         self.ws_thread = WebSocketThread(self)
         self.ws_thread.start()
         
         # Timer untuk refresh
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self.refresh_messages)
-        self.timer.start(3000)
+
     
     def setup_ui(self):
         self.setWindowTitle(f"IT Support Chat - {self.user['full_name']} ({self.user['role'].title()})")
@@ -535,6 +539,32 @@ class ChatWindow(QWidget):
             }
         """)
     
+    def mark_conversation_unread(self, conversation_id):
+        
+        self.unread_map[conversation_id] = True 
+        for i in range(self.conversation_list.count()):
+            item = self.conversation_list.item(i)
+            if item.data(Qt.UserRole) == conversation_id:
+                widget = self.conversation_list.itemWidget(item)
+                if hasattr(widget, 'preview_label'):
+
+                    widget.preview_label.setText("🔵 New message")
+                    widget.preview_label.setStyleSheet("""
+                        QLabel {
+                            color: #4A90E2;
+                            font-size: 13px;
+                            font-weight: bold;
+                        }
+                    """)
+                                    # 🔍 DEBUGGING di sini
+                    print("Unread updated:", conversation_id)
+                    print("Widget preview text:", widget.preview_label.text())
+                    
+                    widget.preview_label.repaint()  # Paksa labelnya redraw
+                    widget.update()                # Paksa ConversationItem-nya update
+                    self.conversation_list.update() # Paksa daftar update
+
+                
     def load_conversations(self):
         response = requests.get(f"{BASE_URL}/get_conversations/{self.user['id']}")
         if response.status_code == 200:
@@ -551,6 +581,7 @@ class ChatWindow(QWidget):
                 item.setData(Qt.UserRole, conv['id'])
                 
                 conv_widget = ConversationItem(conv, self.user['role'])
+                
                 item.setSizeHint(conv_widget.sizeHint())
                 
                 self.conversation_list.addItem(item)
@@ -578,6 +609,26 @@ class ChatWindow(QWidget):
         self.chat_avatar.setText(name[0].upper())
         
         self.load_messages(conversation_id)
+        # Reset style saat dibuka
+        item.setSelected(False)
+        conv_widget.setStyleSheet("")  # Hapus efek biru
+        self.unread_map[conversation_id] = False
+
+        
+        conv_widget.setStyleSheet("")  # Hapus efek biru
+        if hasattr(conv_widget, 'preview_label'):
+            # conv_widget.preview_label.repaint()  # Paksa labelnya redraw
+            # conv_widget.update()                # Paksa ConversationItem-nya update
+            # self.conversation_list.update() # Paksa daftar update
+            conv_widget.preview_label.setText("Click to start conversation")
+            conv_widget.preview_label.setStyleSheet("""
+                QLabel {
+                    color: #7F8C8D;
+                    font-size: 13px;
+                }
+            """)
+
+
     
     def load_messages(self, conversation_id):
         response = requests.get(f"{BASE_URL}/get_messages/{conversation_id}")
@@ -637,12 +688,16 @@ class ChatWindow(QWidget):
     
     def handle_received_message(self, data):
         conv_id = data['conversation_id']
+        print("📨 Pesan baru diterima:", data)
+        
         
         # Jika percakapan sedang dibuka, tampilkan pesannya
         if conv_id == self.current_conversation:
             if not self.message_exists(data['message']['id']):
                 self.add_message_to_ui(data['message'])
-        self.load_conversations()
+        
+        else:
+            self.mark_conversation_unread(data['conversation_id'])
         
         # Pindahkan percakapan ke atas
         # self.move_conversation_to_top(conv_id)
@@ -704,6 +759,7 @@ class ChatWindow(QWidget):
         }
         
         response = requests.post(f"{BASE_URL}/send_message", json=data)
+        self.message_input.clear()
         if response.status_code == 200:
             self.message_input.clear()
     

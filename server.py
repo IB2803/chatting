@@ -9,14 +9,14 @@ app = Flask(__name__)
 # CORS(app)
 CORS(app, resources={
     r"/*": {
-        "origins": ["http://localhost:5000", "http://192.168.128.125:5000"]
+        "origins": ["http://localhost:5000", "http://192.168.128.125:5000" , "http://192.168.47.135:5000"]
     }
 })
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # MySQL configuration
-# app.config['MYSQL_HOST'] = 'localhost'
-app.config['MYSQL_HOST'] = '192.168.128.125'
+app.config['MYSQL_HOST'] = '192.168.47.135'
+# app.config['MYSQL_HOST'] = '192.168.128.125'
 app.config['MYSQL_USER'] = 'root'
 app.config['MYSQL_PASSWORD'] = ''
 app.config['MYSQL_DB'] = 'it_support_chat'

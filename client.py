@@ -17,7 +17,7 @@ from PyQt5.QtGui import QColor, QFont, QPainter, QBrush, QPalette, QPixmap, QIco
 os.environ['QT_LOGGING_RULES'] = 'qt.qpa.fonts=false'
 
 # BASE_URL = "http://localhost:5000"
-BASE_URL = "http://192.168.128.125:5000"  # Ganti <IP_KANTOR> dengan IP server
+BASE_URL = "http://192.168.47.135:5000"  # Ganti <IP_KANTOR> dengan IP server
 
 class WebSocketThread(threading.Thread):
     def __init__(self, chat_window):
@@ -26,7 +26,7 @@ class WebSocketThread(threading.Thread):
         self.running = True
         
     def run(self):
-        ws = create_connection("ws://192.168.128.125:5000")
+        ws = create_connection("ws://192.168.47.135:5000")
         # ws = create_connection(f"ws://{BASE_URL.split('//')[1]}")
         while self.running:
             try:
@@ -50,16 +50,19 @@ class BubbleMessage(QLabel):
         self.setMargin(15)
         self.setTextFormat(Qt.RichText)
         
+        
+        
         # Create message bubble styling similar to the image
         if is_me:
             message_html = f"""
             <div style='font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
-            font-size: 14px; 
-            line-height: 1.4; 
+            font-size: 12px; 
+            line-height: 1; 
             white-space: normal;
+            word-wrap: break-word;
             max-width: 100%;'>
-                <div style='color: #FFFFFF; margin-bottom: 8px; '>{text}</div>
-                <div style='color: rgba(255,255,255,0.8); font-size: 13px; text-align: right; margin-top: 4px;'>
+                <div style='color: #FFFFFF; margin-bottom: 10px; '>{text}</div>
+                <div style='color: rgba(255,255,255,0.8); font-size: 11px; text-align: right; margin-top: 4px;'>
                     {time}
                 </div>
             </div>
@@ -69,7 +72,7 @@ class BubbleMessage(QLabel):
                     background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
                         stop:0 #4A90E2, stop:1 #357ABD);
                     border-radius: 18px;
-                    margin: 4px 60px 4px 4px;
+                    margin: 4px 4px 4px 4px;
                     max-width: 400px;
                     
                 }
@@ -77,13 +80,14 @@ class BubbleMessage(QLabel):
         else:
             message_html = f"""
             <div style='font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
-            font-size: 14px; 
-            line-height: 1.4; 
+            font-size: 12px; 
+            line-height: 1; 
             white-space: normal;
+            word-wrap: break-word;
             max-width: 100%;'>
 
-                <div style='color: #2C3E50; margin-bottom: 8px; '>{text}</div>
-                <div style='color: #95A5A6; font-size: 12px; text-align: left; margin-top: 4px;'>
+                <div style='color: #2C3E50; margin-bottom: 10px; '>{text}</div>
+                <div style='color: #95A5A6; font-size: 11px; text-align: left; margin-top: 4px;'>
                     {time}
                 </div>
             </div>
@@ -94,7 +98,7 @@ class BubbleMessage(QLabel):
                     
                     border: 1px solid #E8ECEF;
                     border-radius: 18px;
-                    margin: 4px 4px 4px 60px;
+                    margin: 4px 4px 4px 4px;
                     max-width: 400px;
                     
                 }
@@ -221,7 +225,7 @@ class ChatWindow(QWidget):
     def setup_ui(self):
         self.setWindowTitle(f"IT Support Chat - {self.user['full_name']} ({self.user['role'].title()})")
         # self.resize(500, 700)
-        self.setFixedSize(500, 700)
+        self.setFixedSize(600, 900)
         
         # Main layout
         main_layout = QHBoxLayout()
@@ -550,7 +554,27 @@ class ChatWindow(QWidget):
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             }
         """)
+
+    def mark_conversation_unread(self, conversation_id):
+        for i in range(self.conversation_list.count()):
+            item = self.conversation_list.item(i)
+            if item.data(Qt.UserRole) == conversation_id:
+                widget = self.conversation_list.itemWidget(item)
+                widget.setStyleSheet("""
+                    ConversationItem {
+                        background-color: #EAF3FF;  /* biru muda */
+                        border-radius: 8px;
+                    }
+                """)
+                # Bisa juga kasih tanda titik di pojok kanan:
+                if not hasattr(widget, 'unread_dot'):
+                    dot = QLabel("•")
+                    dot.setStyleSheet("color: #4A90E2; font-size: 20px;")
+                    dot.setAlignment(Qt.AlignRight)
+                    widget.layout().addWidget(dot)
+                    widget.unread_dot = dot
     
+
     def load_conversations(self):
         response = requests.get(f"{BASE_URL}/get_conversations/{self.user['id']}")
         if response.status_code == 200:
@@ -585,6 +609,13 @@ class ChatWindow(QWidget):
         self.chat_avatar.setText(name[0].upper())
         
         self.load_messages(conversation_id)
+        
+        # Reset style saat dibuka
+        item.setSelected(False)
+        conv_widget.setStyleSheet("")  # Hapus efek biru
+        if hasattr(conv_widget, 'unread_dot'):
+            conv_widget.unread_dot.deleteLater()
+            del conv_widget.unread_dot
     
     def load_messages(self, conversation_id):
         response = requests.get(f"{BASE_URL}/get_messages/{conversation_id}")
@@ -652,6 +683,10 @@ class ChatWindow(QWidget):
             # Cek apakah message sudah ada di UI
             if not self.message_exists(data['message']['id']):
                 self.add_message_to_ui(data['message'])
+        else :
+            self.mark_conversation_unread(data['conversation_id'])
+        
+            
                 
     def message_exists(self, msg_id):
         for i in range(self.messages_layout.count()):
@@ -692,6 +727,7 @@ class ChatWindow(QWidget):
         }
         
         response = requests.post(f"{BASE_URL}/send_message", json=data)
+        self.message_input.clear()
         if response.status_code == 200:
             self.message_input.clear()
     
