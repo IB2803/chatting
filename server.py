@@ -5,18 +5,19 @@ from flask_cors import CORS
 import hashlib
 from datetime import datetime
 
+IP = "192.168.46.6"
+
 app = Flask(__name__)
 # CORS(app)
 CORS(app, resources={
     r"/*": {
-        "origins": ["http://localhost:5000", "http://192.168.128.125:5000" , "http://192.168.47.135:5000"]
+        "origins": ["http://localhost:5000", f"http://{IP}:5000"]
     }
 })
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # MySQL configuration
-app.config['MYSQL_HOST'] = '192.168.47.135'
-# app.config['MYSQL_HOST'] = '192.168.128.125'
+app.config['MYSQL_HOST'] = IP
 app.config['MYSQL_USER'] = 'root'
 app.config['MYSQL_PASSWORD'] = ''
 app.config['MYSQL_DB'] = 'it_support_chat'
@@ -198,29 +199,6 @@ def send_message():
     
     return jsonify({'success': True})
 
-# Socket.IO Events
-# @socketio.on('send_message')
-# def handle_send_message(data):
-#     cur = mysql.connection.cursor()
-#     cur.execute("""
-#         INSERT INTO messages (conversation_id, sender_id, message)
-#         VALUES (%s, %s, %s)
-#     """, (data['conversation_id'], data['sender_id'], data['message']))
-#     mysql.connection.commit()
-    
-#     cur.execute("SELECT * FROM messages WHERE id = %s", (cur.lastrowid,))
-#     message = cur.fetchone()
-#     cur.close()
-    
-#     emit('receive_message', {
-#         'conversation_id': data['conversation_id'],
-#         'message': {
-#             'id': message[0],
-#             'sender_id': message[2],
-#             'message': message[3],
-#             'sent_at': message[4].strftime('%Y-%m-%d %H:%M:%S')
-#         }
-#     }, broadcast=True)
 
 if __name__ == '__main__':
     socketio.run(app, debug=True, host='0.0.0.0', port=5000)

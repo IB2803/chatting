@@ -17,7 +17,8 @@ from PyQt5.QtGui import QColor, QFont, QPainter, QBrush, QPalette, QPixmap, QIco
 os.environ['QT_LOGGING_RULES'] = 'qt.qpa.fonts=false'
 
 # BASE_URL = "http://localhost:5000"
-BASE_URL = "http://192.168.47.135:5000"  # Ganti <IP_KANTOR> dengan IP server
+BASE_URL = "http://192.168.46.6:5000"  # Ganti <IP_KANTOR> dengan IP server
+# BASE_URL = "http://192.168.1.7:5000"  # Ganti <IP_KANTOR> dengan IP server
 
 class WebSocketThread(threading.Thread):
     def __init__(self, chat_window):
@@ -26,7 +27,7 @@ class WebSocketThread(threading.Thread):
         self.running = True
         
     def run(self):
-        ws = create_connection("ws://192.168.47.135:5000")
+        ws = create_connection("ws://192.168.47.119:5000")
         # ws = create_connection(f"ws://{BASE_URL.split('//')[1]}")
         while self.running:
             try:

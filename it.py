@@ -17,7 +17,8 @@ from PyQt5.QtGui import QColor, QFont, QPainter, QBrush, QPalette, QPixmap, QIco
 os.environ['QT_LOGGING_RULES'] = 'qt.qpa.fonts=false'
 
 # BASE_URL = "http://localhost:5000"
-BASE_URL = "http://192.168.47.135:5000"  # Ganti <IP_KANTOR> dengan IP server
+BASE_URL = "http://192.168.46.6:5000"  # Ganti <IP_KANTOR> dengan IP server
+# BASE_URL = "http://192.168.1.7:5000"  # Ganti <IP_KANTOR> dengan IP server
 
 class WebSocketThread(threading.Thread):
     def __init__(self, chat_window):
@@ -26,7 +27,7 @@ class WebSocketThread(threading.Thread):
         self.running = True
         
     def run(self):
-        ws = create_connection("ws://192.168.47.135:5000")
+        ws = create_connection("ws://192.168.47.119:5000")
         # ws = create_connection(f"ws://{BASE_URL.split('//')[1]}")
         while self.running:
             try:
@@ -101,12 +102,12 @@ class BubbleMessage(QLabel):
         self.setGraphicsEffect(shadow)
 
 class ConversationItem(QWidget):
-    def __init__(self, conversation_data, user_role):
+    def __init__(self, conversation_data, user_role, last_message):
         super().__init__()
         self.conversation_data = conversation_data
-        self.setup_ui(conversation_data, user_role)
+        self.setup_ui(conversation_data, user_role, last_message)
     
-    def setup_ui(self, conv, user_role):
+    def setup_ui(self, conv, user_role, last_message):
         layout = QHBoxLayout()
         layout.setContentsMargins(16, 12, 16, 12)
         layout.setSpacing(12)
@@ -160,7 +161,7 @@ class ConversationItem(QWidget):
         info_layout.addLayout(name_status_layout)
         
         # Last message preview (if available)
-        self.preview_label = QLabel("Click to start conversation")
+        self.preview_label = QLabel(last_message)
         self.preview_label.setStyleSheet("""
             QLabel {
                 color: #7F8C8D;
@@ -197,6 +198,7 @@ class ChatWindow(QWidget):
         
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.refresh_messages)
+        self.timer.timeout.connect(self.load_conversations)
         self.timer.start(3000)
         
         # Setup WebSocket
@@ -204,9 +206,9 @@ class ChatWindow(QWidget):
         self.ws_thread = WebSocketThread(self)
         self.ws_thread.start()
         
-        # Timer untuk refresh
+        # last_meessage 
+        self.last_message_conv = {}
 
-    
     def setup_ui(self):
         self.setWindowTitle(f"IT Support Chat - {self.user['full_name']} ({self.user['role'].title()})")
         self.resize(1200, 800)
@@ -538,6 +540,8 @@ class ChatWindow(QWidget):
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             }
         """)
+        
+
     
     def mark_conversation_unread(self, conversation_id):
         
@@ -580,7 +584,9 @@ class ChatWindow(QWidget):
                 item = QListWidgetItem()
                 item.setData(Qt.UserRole, conv['id'])
                 
-                conv_widget = ConversationItem(conv, self.user['role'])
+                last_message = self.load_messages(conv['id'])
+                
+                conv_widget = ConversationItem(conv, self.user['role'], last_message)
                 
                 item.setSizeHint(conv_widget.sizeHint())
                 
@@ -620,7 +626,9 @@ class ChatWindow(QWidget):
             # conv_widget.preview_label.repaint()  # Paksa labelnya redraw
             # conv_widget.update()                # Paksa ConversationItem-nya update
             # self.conversation_list.update() # Paksa daftar update
-            conv_widget.preview_label.setText("Click to start conversation")
+            
+            # set last message
+            # conv_widget.preview_label.setText("Click to start conversation")
             conv_widget.preview_label.setStyleSheet("""
                 QLabel {
                     color: #7F8C8D;
@@ -641,7 +649,9 @@ class ChatWindow(QWidget):
                 widget = item.widget()
                 if widget is not None:
                     widget.deleteLater()
-            
+                    
+            last_message = messages[-1]['message'] if messages else "No messages yet"
+                                
             # Add new messages
             for msg in messages:
                 is_me = msg['sender_id'] == self.user['id']
@@ -669,6 +679,7 @@ class ChatWindow(QWidget):
             
             # Scroll to bottom
             QTimer.singleShot(100, self.scroll_to_bottom)
+        return last_message
     
     def scroll_to_bottom(self):
         scrollbar = self.scroll_area.verticalScrollBar()
@@ -677,6 +688,35 @@ class ChatWindow(QWidget):
     def refresh_messages(self):
         if self.current_conversation:
             self.load_messages(self.current_conversation)
+            
+    def refresh_conversations(self):
+        response = requests.get(f"{BASE_URL}/get_conversations/{self.user['id']}")
+        if response.status_code == 200:
+            conversations = response.json()
+            self.conversation_list.clear()
+            
+            # Urutkan conversations berdasarkan waktu pesan terbaru (descending)
+            conversations.sort(key=lambda x: x.get('last_message_time', ''), reverse=True)
+            
+            for conv in conversations:
+                item = QListWidgetItem()
+                item.setData(Qt.UserRole, conv['id'])
+                
+                conv_widget = ConversationItem(conv, self.user['role'])
+                
+                item.setSizeHint(conv_widget.sizeHint())
+                
+                self.conversation_list.addItem(item)
+                self.conversation_list.setItemWidget(item, conv_widget)
+                
+                # Re-select current conversation
+                if conv['id'] == self.current_conversation:
+                    self.conversation_list.setCurrentItem(item)
+        
+        # Periksa unread map untuk menandai percakapan yang belum dibaca
+        for conv_id, unread in self.unread_map.items():
+            if unread:
+                self.mark_conversation_unread(conv_id)
             
 
             
@@ -1030,6 +1070,8 @@ class LoginWindow(QWidget):
         
         # Hide error after 5 seconds
         QTimer.singleShot(5000, self.error_label.hide)
+
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
