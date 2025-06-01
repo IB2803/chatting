@@ -4,7 +4,7 @@ import requests
 import json
 import threading
 import time
-import socketio
+from websocket import create_connection
 
 from PyQt5.QtWidgets import QFileDialog
 from PyQt5.QtWidgets import (
@@ -20,10 +20,6 @@ from PyQt5.QtGui import QColor, QFont, QPainter, QBrush, QPalette, QPixmap, QIco
 
 # Suppress font warnings
 os.environ['QT_LOGGING_RULES'] = 'qt.qpa.fonts=false'
-
-IP = "192.168.45.141"
-# IP = "192.168.1.7"
-PORT = "5000"
 
 # BASE_URL = "http://localhost:5000"
 # BASE_URL = "http://192.168.46.6:5000"  # Ganti <IP_KANTOR> dengan IP server
@@ -110,72 +106,76 @@ class WebSocketThread(threading.Thread):
     def __init__(self, chat_window):
         super().__init__()
         self.chat_window = chat_window
-        
-        self.sio = socketio.Client(logger=True, engineio_logger=True)
-        self.setup_event_handlers()
-        
         self.running = True
         
-    def setup_event_handlers(self):
-        # Handler untuk event koneksi berhasil
-        @self.sio.event
-        def connect():
-            print("DEBUG: WebSocketThread (python-socketio) - Terhubung ke server Socket.IO!")
-
-        # Handler untuk error koneksi
-        @self.sio.event
-        def connect_error(data):
-            print(f"DEBUG: WebSocketThread (python-socketio) - Gagal terhubung: {data}")
-
-        # Handler untuk event diskoneksi
-        @self.sio.event
-        def disconnect():
-            print("DEBUG: WebSocketThread (python-socketio) - Terputus dari server Socket.IO.")
-
-        # Handler untuk event 'new_message' dari server
-        # Nama event 'new_message' harus sama dengan yang di-emit oleh server.py
-        @self.sio.on('new_message')
-        def on_new_message(data):
-            # 'data' yang diterima di sini adalah payload yang dikirim server, yaitu:
-            # {'conversation_id': ..., 'message': {'id': ..., 'sender_id': ..., ...}}
-            print(f"DEBUG: WebSocketThread (python-socketio) - Menerima 'new_message': {data}")
-            # Emit sinyal ke ChatWindow dengan payload ini.
-            # Logika di ChatWindow.handle_received_message seharusnya sudah kompatibel.
-            self.chat_window.receive_message_signal.emit(data)
-
-        
     def run(self):
-        # MODIFIKASI DI SINI: Tambahkan /socket.io/ pada URL
-        print(f"DEBUG: WebSocketThread (python-socketio) - Mencoba terhubung ke http://{IP}:{PORT}")
-        try:
-            # Lakukan koneksi. Pustaka akan menangani handshake Engine.IO/Socket.IO.
-            # Ia akan mencoba path default /socket.io/
-            # 'transports=['websocket']' memaksa penggunaan WebSocket.
-            self.sio.connect(f"http://{IP}:{PORT}", transports=['websocket'])
-            
-            # sio.wait() akan menjaga thread ini tetap aktif dan memproses event
-            # sampai sio.disconnect() dipanggil atau koneksi terputus.
-            self.sio.wait()
-            print("DEBUG: WebSocketThread (python-socketio) - sio.wait() telah berhenti/unblocked.")
+        ws = create_connection("ws://192.168.56.1:5000")
+        # ws = create_connection(f"ws://{BASE_URL.split('//')[1]}")
+        while self.running:
+            try:
+                message = ws.recv()
+                data = json.loads(message)
+                if data.get('event') == 'new_message':
+                    self.chat_window.receive_message_signal.emit(data['data'])
+            except Exception as e:
+                print("WebSocket error:", e)
+                break
+        ws.close()
 
-        except socketio.exceptions.ConnectionError as e:
-            print(f"DEBUG: WebSocketThread (python-socketio) - Kesalahan koneksi: {e}")
-        except Exception as e_run:
-            # Tangkap error lain yang mungkin terjadi selama run
-            print(f"DEBUG: WebSocketThread (python-socketio) - Error tak terduga di run(): {e_run}")
-        finally:
-            # Ini mungkin tidak akan tercapai jika sio.wait() berjalan terus atau jika error tidak tertangkap
-            # Penutupan koneksi utama ada di metode stop().
-            print("DEBUG: WebSocketThread (python-socketio) - Thread 'run' selesai atau keluar dari try-except.")
+# class BubbleMessage(QLabel):
+#     def __init__(self, text, is_me, sender_name, time, file_path=None, parent=None):
+#         super().__init__(parent)
+#         self.is_me = is_me
+#         self.sender_name = sender_name
+#         self.time = time
+#         self.file_path = file_path
+#         self.msg_id = None # Tambahkan untuk menyimpan ID pesan
+        
+#         self.setWordWrap(True)
+#         self.setMargin(15)
+#         self.setTextFormat(Qt.RichText)
+        
+#         display_text = text
+#         # Jika Anda ingin menampilkan ikon atau nama file yang lebih bersih dari path:
+#         # if self.file_path:
+#         #     display_text = f"📄 File: {os.path.basename(self.file_path)}" 
+#         # Namun, karena server sudah mengirimkan format "[File: namafile.ext]", kita bisa langsung gunakan 'text'.
 
-    def stop(self):
-        print("DEBUG: WebSocketThread (python-socketio) - Metode stop() dipanggil.")
-        if self.sio and self.sio.connected:
-            print("DEBUG: WebSocketThread (python-socketio) - Memutuskan koneksi Socket.IO...")
-            self.sio.disconnect()
-        else:
-            print("DEBUG: WebSocketThread (python-socketio) - Klien Socket.IO tidak terhubung atau sudah terputus.")
+#         if is_me:
+#             message_html = f"""
+#             <div style='font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 15px; line-height: 1;'>
+#                 <div style='color: #FFFFFF; margin-bottom: 8px;'>{display_text}</div>
+#                 <div style='color: rgba(255,255,255,0.8); font-size: 11px; text-align: right; margin-top: 4px;'>{time}</div>
+#             </div>"""
+#             self.setStyleSheet("""
+#                 BubbleMessage {
+#                     background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4A90E2, stop:1 #357ABD);
+#                     border-radius: 18px;
+#                     margin: 4px 4px 4px 60px; /* Margin untuk pesan 'saya' di it.py */
+#                     max-width: 400px;
+#                 }""")
+#         else: # Pesan dari orang lain
+#             message_html = f"""
+#             <div style='font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 15px; line-height: 1;'>
+#                 <div style='color: #2C3E50; margin-bottom: 8px;'>{display_text}</div>
+#                 <div style='color: #95A5A6; font-size: 11px; text-align: left; margin-top: 4px;'>{time}</div>
+#             </div>"""
+#             self.setStyleSheet("""
+#                 BubbleMessage {
+#                     background-color: #FFFFFF; border: 1px solid #E8ECEF; border-radius: 18px;
+#                     margin: 4px 60px 4px 4px; /* Margin untuk pesan 'orang lain' di it.py */
+#                     max-width: 400px;
+#                 }""")
 
+#         self.setText(message_html)
+#         # Perataan (alignment) di it.py biasanya diatur oleh kontainer yang menambahkan addStretch.
+#         # self.setAlignment(Qt.AlignLeft if not is_me else Qt.AlignRight) # Mungkin tidak diperlukan jika kontainer sudah mengatur
+#         self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+
+#         shadow = QGraphicsDropShadowEffect()
+#         shadow.setBlurRadius(8); shadow.setColor(QColor(0, 0, 0, 20)); shadow.setOffset(0, 2)
+#         self.setGraphicsEffect(shadow)
+        
 class BubbleMessage(QLabel):
     def __init__(self, text, is_me, sender_name, time, file_path=None, parent=None):
         super().__init__(parent)
@@ -253,20 +253,17 @@ class BubbleMessage(QLabel):
         super().leaveEvent(event)
  
 class ConversationItem(QWidget):
-    # Versi ini menggunakan 'last_message' yang di-pass saat inisialisasi
-    def __init__(self, conversation_data, user_role, last_message_text="Click to start conversation"): # Terima last_message_text
+    def __init__(self, conversation_data, user_role):
         super().__init__()
         self.conversation_data = conversation_data
-        
-        processed_preview_text = last_message_text
-        
-        self.setup_ui(conversation_data, user_role, processed_preview_text)
-        
-    def setup_ui(self, conv, user_role, display_preview_text): # Terima last_message_text
+        self.setup_ui(conversation_data, user_role)
+    
+    def setup_ui(self, conv, user_role):
         layout = QHBoxLayout()
         layout.setContentsMargins(16, 12, 16, 12)
         layout.setSpacing(12)
         
+        # Avatar circle
         avatar = QLabel()
         avatar.setFixedSize(48, 48)
         avatar.setStyleSheet("""
@@ -282,16 +279,19 @@ class ConversationItem(QWidget):
         
         if user_role == 'employee':
             name = conv.get('tech_name', 'Tech')
+            avatar.setText(name[0].upper())
         else:
             name = conv.get('employee_name', 'User')
-        avatar.setText(name[0].upper() if name else "?") # Handle jika name None
+            avatar.setText(name[0].upper())
         
         avatar.setAlignment(Qt.AlignCenter)
         layout.addWidget(avatar)
         
+        # Message info
         info_layout = QVBoxLayout()
         info_layout.setSpacing(4)
         
+        # Name and status
         name_status_layout = QHBoxLayout()
         name_label = QLabel(name)
         name_label.setStyleSheet("""
@@ -311,22 +311,21 @@ class ConversationItem(QWidget):
         name_status_layout.addStretch()
         info_layout.addLayout(name_status_layout)
         
-        self.preview_label = QLabel(display_preview_text) # Gunakan display preview text yang diterima
+        # Last message preview (if available)
+        self.preview_label = QLabel("Click to start conversation")
+        
         self.preview_label.setStyleSheet("""
             QLabel {
                 color: #7F8C8D;
                 font-size: 13px;
-                white-space: nowrap;
-                min-width: 200px;
-                max-width: 200px;
             }
         """)
-        # self.preview_label.setMaximumWidth(200) # Opsional, atur lebar jika perlu
         info_layout.addWidget(self.preview_label)
         
         layout.addLayout(info_layout)
         self.setLayout(layout)
         
+        # Hover effect
         self.setStyleSheet("""
             ConversationItem {
                 background-color: transparent;
@@ -337,7 +336,6 @@ class ConversationItem(QWidget):
             }
         """)
 
-
 class ChatWindow(QWidget):
     receive_message_signal = pyqtSignal(dict)
     
@@ -345,29 +343,24 @@ class ChatWindow(QWidget):
         super().__init__(parent)
         self.user = user
         self.current_conversation = None
-        self.unread_map = {} 
-        self.message_cache = {}
         self.setup_ui()
-        self.load_conversations() # Panggil setelah setup_ui
+        self.load_conversations()
         
-        # Timer untuk refresh
+        self.unread_map = {} 
+        
         self.timer = QTimer(self)
-        # self.timer.timeout.connect(self.refresh_messages)
-        # self.timer.timeout.connect(self.load_conversations)
-        # self.timer.start(5000) # Tingkatkan interval jika load_conversations tetap di timer
+        self.timer.timeout.connect(self.refresh_messages)
+        self.timer.timeout.connect(self.load_conversations)
+        self.timer.start(3000)
         
-        # Jika tidak ada yang terhubung ke timer, kita tidak perlu start:
-        active_timer_connections = self.timer.receivers(self.timer.timeout) # Cek apakah ada koneksi
-        if active_timer_connections > 0 : # Jika masih ada koneksi lain (misal load_conversations berkala kamu aktifkan lagi)
-             print(f"DEBUG: Timer masih memiliki {active_timer_connections} koneksi aktif, memulai timer.")
-             self.timer.start(5000) 
-        else:
-            print("DEBUG: Tidak ada koneksi ke timer, timer tidak di-start.")
-        
+        # Setup WebSocket
         self.receive_message_signal.connect(self.handle_received_message)
         self.ws_thread = WebSocketThread(self)
         self.ws_thread.start()
         
+        # last_meessage 
+        # self.last_message_conv = {}
+
     def setup_ui(self):
         self.setWindowTitle(f"IT Support Chat - {self.user['full_name']} ({self.user['role'].title()})")
         self.resize(1200, 800)
@@ -740,410 +733,264 @@ class ChatWindow(QWidget):
         except Exception as e:
             print(f"Terjadi kesalahan saat mengirim file: {e}")
             
-    def mark_conversation_unread(self, conversation_id, new_message_text=None):
-        print(f"DEBUG: Menandai belum dibaca untuk conv ID: {conversation_id}") # DEBUG
+    def mark_conversation_unread(self, conversation_id):
+        
         self.unread_map[conversation_id] = True 
         for i in range(self.conversation_list.count()):
             item = self.conversation_list.item(i)
             if item.data(Qt.UserRole) == conversation_id:
                 widget = self.conversation_list.itemWidget(item)
-                if widget and hasattr(widget, 'preview_label'):
-                    display_text = "🔵 New message"
-                    if new_message_text:
-                        # Buat cuplikan, misalnya maksimal 30 karakter, ganti newline dengan spasi
-                        snippet = (new_message_text[:30] + '...') if len(new_message_text) > 30 else new_message_text
-                        cleaned_snippet = snippet.replace(os.linesep, ' ').replace('\n', ' ')
-                        display_text = f"🔵 {cleaned_snippet}"
-                        print("\n\n", display_text, "\n\n")
+                if hasattr(widget, 'preview_label'):
 
-                    widget.preview_label.setText(display_text)
+                    widget.preview_label.setText("🔵 New message")
                     widget.preview_label.setStyleSheet("""
                         QLabel {
-                            color: #4A90E2; font-size: 13px; font-weight: bold;
-                            qproperty-wordWrap: false;
-                            max-width: 200px;
+                            color: #4A90E2;
+                            font-size: 13px;
+                            font-weight: bold;
                         }
                     """)
-                    print(f"DEBUG: Teks preview_label di mark_unread: {widget.preview_label.text()}") # DEBUG
-                break # Keluar dari loop setelah item ditemukan dan diperbarui
+                                    # 🔍 DEBUGGING di sini
+                    print("Unread updated:", conversation_id)
+                    print("Widget preview text:", widget.preview_label.text())
+                    
+                    widget.preview_label.repaint()  # Paksa labelnya redraw
+                    widget.update()                # Paksa ConversationItem-nya update
+                    self.conversation_list.update() # Paksa daftar update
 
                 
     def load_conversations(self):
-        print(f"DEBUG: Memuat percakapan untuk user {self.user['id']}")
-        try: 
-            response = requests.get(f"{BASE_URL}/get_conversations/{self.user['id']}")
-            print(f"DEBUG: ChatWindow - Status load_conversations: {response.status_code}") # DEBUG
-            if response.status_code == 200:
-                try:
-                    conversations = response.json()
-                    print(f"DEBUG: ChatWindow - Percakapan diterima (raw): {conversations}") # DEBUG
-                except requests.exceptions.JSONDecodeError:
-                    print(f"DEBUG: ChatWindow - Gagal parse JSON dari /get_conversations: {response.text}") # DEBUG
-                    conversations = []
+        response = requests.get(f"{BASE_URL}/get_conversations/{self.user['id']}")
+        if response.status_code == 200:
+            conversations = response.json()
+            self.conversation_list.clear()
+            
+            # Urutkan conversations berdasarkan waktu pesan terbaru (descending)
+            conversations.sort(key=lambda x: x.get('last_message_time', ''), reverse=True)
+            self.conversation_list.clear()
+
+            for conv in conversations:
+            # for conv in sorted(conversations, key=lambda x: x['id'], reverse=True):
+                item = QListWidgetItem()
+                item.setData(Qt.UserRole, conv['id'])
                 
-                self.conversation_list.clear() # Hapus item lama
+                # last_message = self.load_messages(conv['id'])
                 
-                if not conversations:
-                    print("DEBUG: ChatWindow - Tidak ada percakapan.") # DEBUG
-                    return
+                conv_widget = ConversationItem(conv, self.user['role'])
                 
-                conversations.sort(key=lambda x: str(x.get('last_updated', '0')), reverse=True) # Gunakan last_updated dari server
-
-
-                for conv_data in conversations:
-                    print(f"DEBUG: ChatWindow - Memproses conv ID: {conv_data.get('id')}") # DEBUG
-                    item = QListWidgetItem()
-                    item.setData(Qt.UserRole, conv_data['id'])
-                    
-                    # Ambil 'last_message_preview' dari conv_data (HARUS DISEDIAKAN SERVER)
-                    last_message_preview = conv_data.get('last_message_preview', "No messages yet.")
-                    if not last_message_preview:
-                         last_message_preview = "No messages yet."
-                    print(f"DEBUG: ChatWindow - Last message untuk conv {conv_data.get('id')}: {last_message_preview}") #DEBUG
-                                    
-                    conv_widget = ConversationItem(conv_data, self.user['role'], last_message_preview)
-                    item.setSizeHint(conv_widget.sizeHint())
-                    
-                    self.conversation_list.addItem(item)
-                    self.conversation_list.setItemWidget(item, conv_widget)
-                    
-                    if self.unread_map.get(conv_data['id'], False) and conv_data['id'] != self.current_conversation:
-                        self.mark_conversation_unread(conv_data['id'], last_message_preview)
-
-                    if conv_data['id'] == self.current_conversation:
-                        self.conversation_list.setCurrentItem(item)
-                    
-                    print(f"DEBUG: ChatWindow - Unread message: \n {self.unread_map}") # DEBUG
-                # print(f"DEBUG: ChatWindow - percakapan dimuat. List:\n {conversations}") # DEBUG
-            else:
-                print(f"DEBUG: ChatWindow - Gagal memuat percakapan: {response.status_code} - {response.text}") # DEBUG
-        except requests.exceptions.RequestException as e:
-            print(f"DEBUG: Error koneksi saat memuat percakapan: {e}")
-        except Exception as e:
-            print(f"DEBUG: Error tak terduga di load_conversations: {e}")
-
+                item.setSizeHint(conv_widget.sizeHint())
+                
+                self.conversation_list.addItem(item)
+                self.conversation_list.setItemWidget(item, conv_widget)
+                
+                            # Re-select current conversation
+                if conv['id'] == self.current_conversation:
+                    self.conversation_list.setCurrentItem(item)
     
     def select_conversation(self, item):
-        if not item:
-            print("DEBUG: ChatWindow - select_conversation dipanggil dengan item None") # DEBUG
-            return
-
         conversation_id = item.data(Qt.UserRole)
-        print(f"DEBUG: ChatWindow - Memilih percakapan ID: {conversation_id}") # DEBUG
         self.current_conversation = conversation_id
         
+        # Update chat header
         conv_widget = self.conversation_list.itemWidget(item)
-        if not conv_widget:
-            print(f"DEBUG: ChatWindow - Tidak ada widget untuk item percakapan ID: {conversation_id}") # DEBUG
-            return
         conv_data = conv_widget.conversation_data
         
-        if self.user['role'] == 'employee': #
-            name = conv_data.get('tech_name', 'Technician') #
+        if self.user['role'] == 'employee':
+            name = conv_data.get('tech_name', 'Technician')
         else:
-            name = conv_data.get('employee_name', 'Employee') #
+            name = conv_data.get('employee_name', 'Employee')
         
-        self.chat_name.setText(name) #
-        self.chat_status.setText("🟢 Active now" if conv_data.get('status') != 'closed' else "⚫ Closed") #
-        self.chat_avatar.setText(name[0].upper() if name else "?") #
+        self.chat_name.setText(name)
+        self.chat_status.setText("🟢 Active now" if conv_data.get('status') != 'closed' else "⚫ Closed")
+        self.chat_avatar.setText(name[0].upper())
         
         self.load_messages(conversation_id , scroll_to_bottom=True)
         # Reset style saat dibuka
         item.setSelected(False)
         conv_widget.setStyleSheet("")  # Hapus efek biru
         self.unread_map[conversation_id] = False
-        
-        # Reset style dasar ConversationItem
-        default_item_style = ConversationItem(conv_data, self.user['role'], "").styleSheet() # Dapatkan style dasar
-        conv_widget.setStyleSheet(default_item_style)
 
         
-        # Reset tampilan preview_label ke pesan terakhir yang sebenarnya
+        conv_widget.setStyleSheet("")  # Hapus efek biru
         if hasattr(conv_widget, 'preview_label'):
-            # Ambil preview pesan terakhir dari data percakapan yang tersimpan di widget
-            actual_last_preview = conv_widget.conversation_data.get('last_message_preview', "No messages yet.")
-
-            MAX_PREVIEW_LENGTH = 35 # Sesuaikan
-            processed_preview = actual_last_preview
-            if not isinstance(actual_last_preview, str) or not actual_last_preview.strip():
-                processed_preview = "No messages yet."
-            elif len(actual_last_preview) > MAX_PREVIEW_LENGTH:
-                processed_preview = actual_last_preview[:MAX_PREVIEW_LENGTH - 3] + "..."
-
-            conv_widget.preview_label.setText(processed_preview)
+            # conv_widget.preview_label.repaint()  # Paksa labelnya redraw
+            # conv_widget.update()                # Paksa ConversationItem-nya update
+            # self.conversation_list.update() # Paksa daftar update
+            
+            # set last message
+            # conv_widget.preview_label.setText("Click to start conversation")
             conv_widget.preview_label.setStyleSheet("""
                 QLabel {
-                    color: #7F8C8D; /* Warna normal */
+                    color: #7F8C8D;
                     font-size: 13px;
-                    /* Hapus properti CSS penyebab warning jika masih ada */
                 }
             """)
-            print(f"DEBUG: IT/select_conversation - Preview label untuk {conversation_id} direset ke: '{processed_preview}'")
-        
-        # item.setSelected(False) # Sebaiknya tidak di-unselect manual
-        # Reset style umum ConversationItem jika ada style khusus untuk unread selain preview_label
-        default_style = """
-            ConversationItem { background-color: transparent; border-radius: 8px; }
-            ConversationItem:hover { background-color: #F8F9FA; }
-        """ # Ambil dari definisi kelas atau konstanta
-        conv_widget.setStyleSheet(default_style)
-        print(f"DEBUG: ChatWindow - Percakapan {conversation_id} dipilih dan ditandai sudah dibaca.") # DEBUG
+
+
     
     def load_messages(self, conversation_id, scroll_to_bottom=False):
-        print(f"DEBUG: ChatWindow - Memuat pesan untuk conv_id: {conversation_id}") # DEBUG
-        try:
-            response = requests.get(f"{BASE_URL}/get_messages/{conversation_id}", timeout=5)
-            print(f"DEBUG: ChatWindow - Status load_messages: {response.status_code}") # DEBUG
-            if response.status_code == 200:
-                try:
-                    messages_from_server = response.json()
-                except requests.exceptions.JSONDecodeError:
-                    print(f"DEBUG: ChatWindow - Gagal parse JSON dari /get_messages: {response.text}") # DEBUG
-                    messages_from_server = []
+        response = requests.get(f"{BASE_URL}/get_messages/{conversation_id}")
+        if response.status_code == 200:
+            messages = response.json()
+            
+            # Clear existing messages
+            while self.messages_layout.count():
+                item = self.messages_layout.takeAt(0)
+                widget = item.widget()
+                if widget is not None:
+                    widget.deleteLater()
                     
-                # Simpan pesan ke cache
-                self.message_cache[conversation_id] = messages_from_server # Simpan pesan ke cache
-                print(f"DEBUG: ChatWindow - Pesan untuk conv {conversation_id} disimpan ke cache. Jumlah: {len(messages_from_server)}")
-
-                while self.messages_layout.count() > 1: # Sisakan stretch item
-                    item_to_remove = self.messages_layout.takeAt(0)
-                    widget = item_to_remove.widget()
-                    if widget:
-                        widget.deleteLater()
-                
-                # Tampilkan pesan dari cache
-                if conversation_id in self.message_cache:
-                    for msg_data in self.message_cache[conversation_id]:
-                        self.add_message_to_ui( # Panggil add_message_to_ui yang sudah ada
-                            msg_data['message'], 
-                            msg_data['sender_id'] == self.user['id'],
-                            msg_data['sender_name'],
-                            msg_data['sent_at'],
-                            msg_data['id'], # msg_id penting untuk message_exists
-                            file_path=msg_data.get('file_path')
-                        )
-                        # Create container for proper alignment
-                        container = QWidget()
-                        container_layout = QHBoxLayout()
-                        container_layout.setContentsMargins(0, 0, 0, 0)
-
-                    
-                    # Scroll to bottom
-                    if scroll_to_bottom:
-                        QTimer.singleShot(100, self.scroll_to_bottom)
-                        
-                QTimer.singleShot(100, self.scroll_to_bottom)
-                return self.message_cache.get(conversation_id, []) 
-            else:
-                print(f"DEBUG: ChatWindow - Gagal memuat pesan: {response.status_code} - {response.text}") # DEBUG
-        except requests.exceptions.RequestException as e:
-            print(f"DEBUG: ChatWindow - Error koneksi saat memuat pesan: {e}") # DEBUG
-        except Exception as e:
-            print(f"DEBUG: ChatWindow - Error tak terduga di load_messages: {e}") # DEBUG
-            
-        # Jika gagal, pastikan cache untuk conversation_id ini kosong atau sesuai keadaan
-        self.message_cache[conversation_id] = []
-        return [] # Kembalikan list kosong jika gagal
-    
-    def scroll_to_bottom(self): #
-        scrollbar = self.scroll_area.verticalScrollBar() #
-        scrollbar.setValue(scrollbar.maximum()) #
-    
-    def refresh_messages(self): #
-        if self.current_conversation: #
-            print(f"DEBUG: ChatWindow - Refresh messages untuk conv: {self.current_conversation}") # DEBUG
-            self.load_messages(self.current_conversation) #
-            
-    def handle_received_message(self, data):
-        conv_id = data['conversation_id']
-        message_content = data['message'] # Ini dictionary: {id, message, sender_id, sender_name, sent_at}
-        print(f"DEBUG: IT/handle_received_message - 📨 Pesan baru untuk conv_id {conv_id}: {message_content.get('message')}")
-
-        # 1. Tambahkan pesan ke cache
-        if conv_id not in self.message_cache:
-            self.message_cache[conv_id] = []
-
-        # Cek apakah pesan dengan ID ini sudah ada di cache untuk conv_id ini
-        message_already_in_cache = False
-        for msg_in_cache in self.message_cache[conv_id]:
-            if msg_in_cache.get('id') == message_content.get('id'):
-                message_already_in_cache = True
-                break
-            
-        if not message_already_in_cache:
-            self.message_cache[conv_id].append(message_content)
-            print(f"DEBUG: IT/handle_received_message - Pesan ID {message_content.get('id')} ditambahkan ke cache untuk conv {conv_id}.")
-        else:
-            print(f"DEBUG: IT/handle_received_message - Pesan ID {message_content.get('id')} sudah ada di cache untuk conv {conv_id}.")
-
-        # 2. Cari item percakapan di list sidebar
-        item_widget = None
-        item_found_in_sidebar = False
-        list_item_object = None # Untuk menyimpan QListWidgetItem
-
-        for i in range(self.conversation_list.count()):
-            current_list_item = self.conversation_list.item(i)
-            if current_list_item.data(Qt.UserRole) == conv_id:
-                item_widget = self.conversation_list.itemWidget(current_list_item)
-                item_found_in_sidebar = True
-                list_item_object = current_list_item # Simpan QListWidgetItem
-                
-                # Update data internal di ConversationItem (jika perlu, untuk konsistensi saat select)
-                if isinstance(item_widget, ConversationItem):
-                    item_widget.conversation_data['last_message_preview'] = message_content.get('message')
-                    item_widget.conversation_data['last_updated'] = message_content.get('sent_at') # Gunakan sent_at sebagai last_updated
-                    print(f"DEBUG: IT/handle_received_message - Data lokal ConversationItem {conv_id} diperbarui.")
-                break
-        
-        # 3. Proses berdasarkan apakah percakapan aktif atau tidak
-        if conv_id == self.current_conversation:
-            print(f"DEBUG: IT/handle_received_message - Pesan untuk percakapan aktif {conv_id}.")
-            if not self.message_exists(message_content.get('id')):
-                self.add_message_to_ui(
-                    message_content.get('message'), 
-                    message_content.get('sender_id') == self.user['id'], 
-                    message_content.get('sender_name'), 
-                    message_content.get('sent_at'),
-                    message_content.get('id')
+            # last_message = messages[-1]['message'] if messages else "No messages yet"
+                                
+            # Add new messages
+            for msg in messages:
+                is_me = msg['sender_id'] == self.user['id']
+                bubble = BubbleMessage(
+                    msg['message'], 
+                    is_me,
+                    msg['sender_name'],
+                    msg['sent_at'],
+                    file_path=msg.get('file_path') # DIPERBARUI: Teruskan file_path
                 )
-            # Meskipun aktif, kita tetap ingin itemnya pindah ke atas jika ada pesan baru
-            if item_found_in_sidebar:
-                self.move_conversation_to_top(conv_id)
-        else: # Pesan untuk percakapan yang tidak aktif
-            if item_found_in_sidebar:
-                print(f"DEBUG: IT/handle_received_message - Pesan untuk percakapan TIDAK aktif {conv_id}. Menandai belum dibaca dan pindah ke atas.")
-                self.mark_conversation_unread(conv_id, message_content.get("message")) # Ini akan set preview_label ke "🔵 New message"
-                self.move_conversation_to_top(conv_id)
-            else:
-                # Percakapan ini belum ada di list, mungkin percakapan baru yang dibuat oleh employee lain
-                print(f"DEBUG: IT/handle_received_message - Pesan untuk percakapan BARU {conv_id} (tidak ada di list). Memuat ulang semua.")
-                self.load_conversations() # Muat ulang semua untuk menampilkan percakapan baru ini
-                self.unread_map[conv_id] = True # Tandai sebagai belum dibaca di map
-
-
-    def move_conversation_to_top(self, conversation_id):
-        print(f"DEBUG: IT/move_conversation_to_top (Revisi Unread Style) - Mencoba memindahkan percakapan ID: {conversation_id}")
-        
-        source_index = -1
-        original_item_widget_ref = None 
-
-        for i in range(self.conversation_list.count()):
-            item = self.conversation_list.item(i) 
-            if item.data(Qt.UserRole) == conversation_id:
-                source_index = i
-                original_item_widget_ref = self.conversation_list.itemWidget(item)
-                break
-        
-        if source_index == -1:
-            print(f"DEBUG: IT/move_conversation_to_top (Revisi Unread Style) - Item {conversation_id} tidak ditemukan.")
-            return
-        
-        # Jika item sudah di atas, tidak perlu dipindahkan.
-        # Styling unread sudah ditangani oleh mark_conversation_unread() yang dipanggil sebelumnya
-        # pada original_item_widget_ref.
-        if source_index == 0:
-            print(f"DEBUG: IT/move_conversation_to_top (Revisi Unread Style) - Item {conversation_id} sudah di posisi teratas.")
-            # Kita bisa pastikan preview text di-update jika datanya berubah, meskipun sudah di atas
-            if original_item_widget_ref and hasattr(original_item_widget_ref, 'conversation_data') and hasattr(original_item_widget_ref, 'preview_label'):
-                is_unread = self.unread_map.get(conversation_id, False)
-                current_preview_from_data = original_item_widget_ref.conversation_data.get('last_message_preview', "Tidak ada pesan.")
-                snippet = (current_preview_from_data[:30] + '...') if len(current_preview_from_data) > 30 else current_preview_from_data
-                snippet = snippet.replace(os.linesep, ' ').replace('\n', ' ')
-
-                if is_unread:
-                    original_item_widget_ref.preview_label.setText(f"🔵 {snippet}")
-                    original_item_widget_ref.preview_label.setStyleSheet("""
-                        QLabel {
-                            color: #4A90E2; font-size: 13px; font-weight: bold;
-                            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-                        }
-                    """)
-                else: # Jika karena alasan tertentu sudah terbaca tapi di paling atas
-                    original_item_widget_ref.preview_label.setText(snippet)
-                    original_item_widget_ref.preview_label.setStyleSheet("""
-                        QLabel {
-                            color: #7F8C8D; font-size: 13px; font-weight: normal;
-                            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-                        }
-                    """)
-            return
-
-        if not original_item_widget_ref or not hasattr(original_item_widget_ref, 'conversation_data'):
-            print(f"DEBUG: IT/move_conversation_to_top (Revisi Unread Style) - Widget atau conversation_data untuk item {conversation_id} tidak ditemukan. Operasi dibatalkan.")
-            return
-
-        conv_data_to_recreate = original_item_widget_ref.conversation_data
-        last_preview_text_from_data = conv_data_to_recreate.get('last_message_preview', "Tidak ada pesan.")
-        if not last_preview_text_from_data: 
-            last_preview_text_from_data = "Tidak ada pesan."
-        
-        # Buat QListWidgetItem BARU.
-        new_qlist_item = QListWidgetItem()
-        new_qlist_item.setData(Qt.UserRole, conversation_id)
-        
-        # Buat instance ConversationItem BARU.
-        # Berikan teks preview dasar (tanpa "🔵") saat pembuatan.
-        new_conv_widget = ConversationItem(
-            conv_data_to_recreate,
-            self.user['role'],
-            last_preview_text_from_data 
-        )
-        new_qlist_item.setSizeHint(new_conv_widget.sizeHint())
-
-        # Hapus QListWidgetItem yang lama.
-        item_lama_yang_diambil = self.conversation_list.takeItem(source_index)
-        if item_lama_yang_diambil:
-            if original_item_widget_ref:
-                original_item_widget_ref.deleteLater() 
-            del item_lama_yang_diambil
-            print(f"DEBUG: IT/move_conversation_to_top (Revisi Unread Style) - Item lama dan widgetnya untuk {conversation_id} telah dijadwalkan untuk dihapus.")
-        else:
-            print(f"DEBUG: IT/move_conversation_to_top (Revisi Unread Style) - Gagal takeItem untuk item lama {conversation_id}.")
-            return
-
-        # Masukkan QListWidgetItem BARU ke paling atas.
-        self.conversation_list.insertItem(0, new_qlist_item)
-        
-        # Pasang ConversationItem widget BARU ke QListWidgetItem BARU.
-        self.conversation_list.setItemWidget(new_qlist_item, new_conv_widget)
-        
-        # Setelah widget BARU dipasang, cek self.unread_map dan terapkan styling unread jika perlu.
-        # Ini akan menangani kasus di mana item dipindahkan dari bawah ke atas dan harus tetap unread.
-        if self.unread_map.get(conversation_id, False):
-            if hasattr(new_conv_widget, 'preview_label'):
-                # Ambil teks preview asli dari data (tanpa "🔵") untuk membuat snippet
-                raw_preview_for_snippet = last_preview_text_from_data 
-                snippet = (raw_preview_for_snippet[:30] + '...') if len(raw_preview_for_snippet) > 30 else raw_preview_for_snippet
-                snippet = snippet.replace(os.linesep, ' ').replace('\n', ' ')
+                bubble.msg_id = msg.get('id') # Simpan ID pesan di bubble
+                # Create container for proper alignment
+                container = QWidget()
+                container_layout = QHBoxLayout()
+                container_layout.setContentsMargins(0, 0, 0, 0)
                 
-                unread_display_text = f"🔵 {snippet}"
+                if is_me:
+                    container_layout.addStretch()
+                    container_layout.addWidget(bubble)
+                else:
+                    container_layout.addWidget(bubble)
+                    container_layout.addStretch()
                 
-                new_conv_widget.preview_label.setText(unread_display_text)
-                new_conv_widget.preview_label.setStyleSheet("""
-                    QLabel {
-                        color: #4A90E2; font-size: 13px; font-weight: bold;
-                        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-                    }
-                """)
-                print(f"DEBUG: IT/move_conversation_to_top (Revisi Unread Style) - Gaya unread diterapkan pada widget BARU untuk {conversation_id}")
-        
-        print(f"DEBUG: IT/move_conversation_to_top (Revisi Unread Style) - Berhasil memindahkan {conversation_id}.")
-        # self.conversation_list.setCurrentItem(new_qlist_item) # Opsional
+                container.setLayout(container_layout)
+                self.messages_layout.addWidget(container)
             
+            # Scroll to bottom
+            if scroll_to_bottom:
+                QTimer.singleShot(100, self.scroll_to_bottom)
+        # return last_message
+    
+    def scroll_to_bottom(self):
+        scrollbar = self.scroll_area.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+    
+    def refresh_messages(self):
+        if self.current_conversation:
+            self.load_messages(self.current_conversation)
+        else:
+            return
+            
+            # Simpan posisi scroll sebelum refresh
+        scrollbar = self.scroll_area.verticalScrollBar()
+        scroll_position = scrollbar.value()
+        at_bottom = scrollbar.value() == scrollbar.maximum()
+        
+        # Load messages
+        self.load_messages(self.current_conversation)
+        
+        # Jika sebelumnya tidak di bagian bawah, kembalikan ke posisi semula
+        if not at_bottom:
+            QTimer.singleShot(100, lambda: scrollbar.setValue(scroll_position))
+            
+    def refresh_conversations(self):
+        response = requests.get(f"{BASE_URL}/get_conversations/{self.user['id']}")
+        if response.status_code == 200:
+            conversations = response.json()
+            self.conversation_list.clear()
+            
+            # Urutkan conversations berdasarkan waktu pesan terbaru (descending)
+            conversations.sort(key=lambda x: x.get('last_message_time', ''), reverse=True)
+            
+            for conv in conversations:
+                item = QListWidgetItem()
+                item.setData(Qt.UserRole, conv['id'])
+                
+                conv_widget = ConversationItem(conv, self.user['role'])
+                
+                item.setSizeHint(conv_widget.sizeHint())
+                
+                self.conversation_list.addItem(item)
+                self.conversation_list.setItemWidget(item, conv_widget)
+                
+                # Re-select current conversation
+                if conv['id'] == self.current_conversation:
+                    self.conversation_list.setCurrentItem(item)
+        
+        # Periksa unread map untuk menandai percakapan yang belum dibaca
+        for conv_id, unread in self.unread_map.items():
+            if unread:
+                self.mark_conversation_unread(conv_id)
+            
+
+            
+    # def handle_received_message(self, data):
+    #     if data['conversation_id'] == self.current_conversation:
+    #         # Cek apakah message sudah ada di UI
+    #         if not self.message_exists(data['message']['id']):
+    #             self.add_message_to_ui(data['message'])
+    
+    # def handle_received_message(self, data):
+    #     conv_id = data['conversation_id']
+    #     print("📨 Pesan baru diterima:", data)
+        
+    #     message_details = data['message'] # Ini adalah dictionary untuk pesan itu sendiri
+    #     # Jika percakapan sedang dibuka, tampilkan pesannya
+    #     if conv_id == self.current_conversation:
+    #         if not self.message_exists(data['message']['id']):
+    #             self.add_message_to_ui(data['message'])
+    #             # Scroll ke bawah hanya jika sudah di bagian bawah
+    #             scrollbar = self.scroll_area.verticalScrollBar()
+    #             if scrollbar.value() == scrollbar.maximum():
+    #                 QTimer.singleShot(100, self.scroll_to_bottom)
+        
+    #     else:
+    #         self.mark_conversation_unread(data['conversation_id'])
+        
+        # Pindahkan percakapan ke atas
+        # self.move_conversation_to_top(conv_id)
+        
+    def handle_received_message(self, data): # data adalah dict berisi detail pesan
+        conv_id = data['conversation_id'] #
+        print("📨 Pesan baru diterima (IT):", data)
+        
+        message_details = data['message'] # Ini adalah dictionary untuk pesan itu sendiri
+
+        if conv_id == self.current_conversation:
+            if not self.message_exists(message_details.get('id')): # Periksa menggunakan ID pesan
+                # Teruskan seluruh dictionary message_details ke add_message_to_ui
+                self.add_message_to_ui(message_details, scroll_to_bottom=True) # DIPERBARUI
+                
+                scrollbar = self.scroll_area.verticalScrollBar()
+                if scrollbar.value() >= scrollbar.maximum() - 20: # Toleransi kecil jika tidak persis di bawah
+                    QTimer.singleShot(100, self.scroll_to_bottom)
+        else:
+            self.mark_conversation_unread(conv_id) #
+        
+    def move_conversation_to_top(self, conversation_id):
+        for i in range(self.conversation_list.count()):
+            item = self.conversation_list.item(i)
+            if item.data(Qt.UserRole) == conversation_id:
+                widget = self.conversation_list.itemWidget(item)
+
+                # Hapus item dari posisinya sekarang
+                self.conversation_list.takeItem(i)
+
+                # Tambah ulang ke paling atas
+                self.conversation_list.insertItem(0, item)
+                self.conversation_list.setItemWidget(item, widget)
+                break
+
+            
+        
+                
     def message_exists(self, msg_id):
-        if msg_id is None: return False # Jika msg_id None, anggap belum ada
         for i in range(self.messages_layout.count()):
-            container_widget = self.messages_layout.itemAt(i).widget()
-            if container_widget:
-                # BubbleMessage adalah child dari container_widget
-                # Asumsi bubble adalah widget pertama (atau satu-satunya non-stretch) di layout container
-                if container_widget.layout() and container_widget.layout().count() > 0:
-                    bubble_item = container_widget.layout().itemAt(0 if container_widget.layout().itemAt(0).widget() else 1)
-                    if bubble_item:
-                        bubble_widget = bubble_item.widget()
-                        if isinstance(bubble_widget, BubbleMessage) and hasattr(bubble_widget, 'msg_id') and bubble_widget.msg_id == msg_id:
-                            print(f"DEBUG: Pesan dengan ID {msg_id} sudah ada di UI.") # DEBUG
-                            return True
+            widget = self.messages_layout.itemAt(i).widget()
+            if hasattr(widget, 'msg_id') and widget.msg_id == msg_id:
+                return True
         return False
     
     def message_exists(self, msg_id):
@@ -1196,8 +1043,8 @@ class ChatWindow(QWidget):
         bubble.msg_id = msg_data.get('id') # Simpan ID pesan di bubble
 
         container = QWidget()
-        container_layout = QHBoxLayout(container)
-        container_layout.setContentsMargins(0,0,0,0)
+        container_layout = QHBoxLayout()
+        container_layout.setContentsMargins(0, 0, 0, 0)
         
         if is_me:
             container_layout.addStretch()
@@ -1217,48 +1064,34 @@ class ChatWindow(QWidget):
         if not self.current_conversation or not self.message_input.toPlainText().strip():
             return
         
-        message_text = self.message_input.toPlainText().strip()
-        print(f"DEBUG: Mengirim pesan: '{message_text}' ke conv ID: {self.current_conversation}") # DEBUG
+        message = self.message_input.toPlainText().strip()
         data = {
             'conversation_id': self.current_conversation,
             'sender_id': self.user['id'],
-            'message': message_text
+            'message': message
         }
         
-        try:
-            response = requests.post(f"{BASE_URL}/send_message", json=data)
-            print(f"DEBUG: Status send_message: {response.status_code}") # DEBUG
-            if response.status_code == 200:
-                self.message_input.clear()
-                # Pesan akan muncul via WebSocket, jadi tidak perlu refresh manual di sini
-                # Mungkin panggil load_conversations untuk update preview dan urutan
-                # QTimer.singleShot(200, self.load_conversations) # Beri jeda agar server sempat update DB
-            else:
-                print(f"DEBUG: Gagal mengirim pesan: {response.text}") # DEBUG
-                # Tampilkan error ke pengguna jika perlu
-        except requests.exceptions.RequestException as e:
-            print(f"DEBUG: Error koneksi saat mengirim pesan: {e}") # DEBUG
+        response = requests.post(f"{BASE_URL}/send_message", json=data)
+        self.message_input.clear()
+        if response.status_code == 200:
+            self.message_input.clear()
+        else:
+            QTimer.singleShot(100, self.scroll_to_bottom)
     
-    def create_new_conversation(self): #
-        print("DEBUG: Membuat percakapan baru") # DEBUG
-        data = {'employee_id': self.user['id'], 'technician_id': None} #
-        try:
-            response = requests.post(f"{BASE_URL}/create_conversation", json=data) #
-            print(f"DEBUG: Status create_conversation: {response.status_code}") # DEBUG
-            if response.status_code == 200: #
-                self.load_conversations() #
-            else:
-                print(f"DEBUG: Gagal membuat percakapan: {response.text}") # DEBUG
-        except requests.exceptions.RequestException as e:
-            print(f"DEBUG: Error koneksi saat membuat percakapan: {e}") # DEBUG
+    def create_new_conversation(self):
+        data = {
+            'employee_id': self.user['id'],
+            'technician_id': None
+        }
+        
+        response = requests.post(f"{BASE_URL}/create_conversation", json=data)
+        if response.status_code == 200:
+            self.load_conversations()
     
     def closeEvent(self, event):
-        print("DEBUG: ChatWindow - Menutup ChatWindow, menghentikan WebSocket thread.")
-        if hasattr(self, 'ws_thread') and self.ws_thread.is_alive():
-            self.ws_thread.stop()  # Panggil metode stop dari WebSocketThread yang baru
-            self.ws_thread.join(timeout=2) # Tunggu thread selesai (opsional, dengan timeout)
+        self.ws_thread.running = False
+        self.ws_thread.join()
         super().closeEvent(event)
-
 
 class LoginWindow(QWidget):
     def __init__(self):
@@ -1512,6 +1345,8 @@ class LoginWindow(QWidget):
         
         # Hide error after 5 seconds
         QTimer.singleShot(5000, self.error_label.hide)
+
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
