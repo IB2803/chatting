@@ -8,6 +8,9 @@ from flask_cors import CORS
 import hashlib
 
 from datetime import datetime
+import os
+from werkzeug.utils import secure_filename
+from flask import Flask, request, jsonify, send_from_directory
 
 IP = "192.168.45.141"
 # IP = "192.168.1.7"
@@ -123,7 +126,7 @@ def get_conversations(user_id):
 def get_messages(conversation_id):
     cur = mysql.connection.cursor()
     cur.execute("""
-        SELECT m.id, m.sender_id, u.full_name, m.message, m.sent_at, m.read_at
+        SELECT m.id, m.sender_id, u.full_name, m.message, m.sent_at, m.read_at, m.file_path
         FROM messages m
         JOIN users u ON m.sender_id = u.id
         WHERE m.conversation_id = %s
@@ -138,7 +141,8 @@ def get_messages(conversation_id):
             'sender_name': msg[2],
             'message': msg[3],
             'sent_at': msg[4].strftime('%Y-%m-%d %H:%M:%S'),
-            'read_at': msg[5].strftime('%Y-%m-%d %H:%M:%S') if msg[5] else None
+            'read_at': msg[5].strftime('%Y-%m-%d %H:%M:%S') if msg[5] else None,
+            'file_path': msg[6]  # This correctly includes file_path
         })
     cur.close()
     return jsonify(messages)
@@ -223,6 +227,92 @@ def send_message():
     else:
         return jsonify({'success': False, 'message': 'Failed to retrieve sent message details'}), 500
 
+
+    # Kirim notifikasi real-time via Socket.IO
+    socketio.emit('new_message', {
+        'conversation_id': conversation_id,
+        'message': {
+            'id': message_data[0],
+            'sender_id': message_data[1],
+            'sender_name': message_data[2],
+            'message': message_data[3],
+            'sent_at': message_data[4].strftime('%Y-%m-%d %H:%M:%S')
+        }
+    }, broadcast=True)
+    
+    return jsonify({'success': True})
+
+# Konfigurasi folder upload
+UPLOAD_FOLDER = 'uploads'
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'pdf', 'doc', 'docx', 'mp4', 'mov', 'avi', 'zip', 'rar', 'mkv'}
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+def allowed_file(filename):
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+@app.route('/upload_file', methods=['POST'])
+def upload_file():
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'message': 'No file part'})
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'success': False, 'message': 'No selected file'})
+    
+    if file and allowed_file(file.filename):
+        filename = secure_filename(file.filename)
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(filepath)
+        
+        # Simpan informasi file ke database
+        conversation_id = request.form.get('conversation_id')
+        sender_id = request.form.get('sender_id')
+        
+        cur = mysql.connection.cursor()
+        cur.execute("""
+            INSERT INTO messages (conversation_id, sender_id, message, file_path)
+            VALUES (%s, %s, %s, %s)
+        """, (conversation_id, sender_id, f"[File: {filename}]", filepath))
+        
+        cur.execute("UPDATE conversations SET last_updated = NOW() WHERE id = %s", (conversation_id,))
+        mysql.connection.commit()
+        
+        # Dapatkan detail pesan yang baru dikirim
+        cur.execute("""
+            SELECT m.id, m.sender_id, u.full_name, m.message, m.sent_at, m.file_path
+            FROM messages m
+            JOIN users u ON m.sender_id = u.id
+            WHERE m.id = %s
+        """, (cur.lastrowid,))
+        
+        message_data = cur.fetchone()
+        cur.close()
+        
+        # Kirim notifikasi real-time via Socket.IO
+        socketio.emit('new_message', {
+            'conversation_id': conversation_id,
+            'message': {
+                'id': message_data[0],
+                'sender_id': message_data[1],
+                'sender_name': message_data[2],
+                'message': message_data[3],
+                'file_path': message_data[5],
+                'sent_at': message_data[4].strftime('%Y-%m-%d %H:%M:%S')
+            }
+        }, broadcast=True)
+        
+        return jsonify({'success': True, 'file_path': filepath})
+    
+    return jsonify({'success': False, 'message': 'File type not allowed'})
+
+# Tambahkan endpoint baru untuk menyajikan file dari folder 'uploads'
+@app.route('/uploads/<path:filename>')
+def uploaded_file_serve(filename):
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+
 if __name__ == '__main__':
-    print("Starting server with Flask-SocketIO (eventlet should be auto-detected)...")
+    # Pastikan UPLOAD_FOLDER sudah didefinisikan di konfigurasi app
+    if not os.path.exists(app.config['UPLOAD_FOLDER']):
+        os.makedirs(app.config['UPLOAD_FOLDER'])
     socketio.run(app, debug=True, host='0.0.0.0', port=5000, use_reloader=False)

@@ -3,15 +3,20 @@ import os
 import requests
 import json
 import threading
+import time
 import socketio
 
+from PyQt5.QtWidgets import QFileDialog
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QListWidget, QTextEdit,
-    QScrollArea, QFrame, QSizePolicy, QListWidgetItem, QGraphicsDropShadowEffect
+    QScrollArea, QFrame, QSizePolicy, QListWidgetItem, QGraphicsDropShadowEffect,
+    QFileDialog, QMessageBox
 )
-from PyQt5.QtCore import pyqtSignal, Qt, QTimer, QUrl
-from PyQt5.QtGui import QColor, QFont, QPainter, QBrush, QPalette, QPixmap, QIcon
+from PyQt5.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply # Untuk memuat gambar secara asinkron
+from PyQt5.QtCore import pyqtSignal, Qt, QTimer, QUrl, QMimeData, QDir, QStandardPaths
+from PyQt5.QtGui import QColor, QFont, QPainter, QBrush, QPalette, QPixmap, QIcon, QDesktopServices, QImage
+
 
 # Suppress font warnings
 os.environ['QT_LOGGING_RULES'] = 'qt.qpa.fonts=false'
@@ -21,8 +26,86 @@ IP = "192.168.45.141"
 PORT = "5000"
 
 # BASE_URL = "http://localhost:5000"
-BASE_URL = f"http://{IP}:{PORT}"  # Ganti <IP_KANTOR> dengan IP server
+# BASE_URL = "http://192.168.46.6:5000"  # Ganti <IP_KANTOR> dengan IP server
+BASE_URL = "http://192.168.56.1:5000"  # Ganti <IP_KANTOR> dengan IP server   
 
+def is_image_file(filename_or_path):
+    if not filename_or_path:
+        return False
+    filename = os.path.basename(filename_or_path)
+    return filename.lower().endswith(('.png', '.jpg', '.jpeg', '.gif'))
+
+
+class FilePasteTextEdit(QTextEdit):
+    def __init__(self, parent_chat_window, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.parent_chat_window = parent_chat_window
+        self.setAcceptRichText(True)
+
+    def canInsertFromMimeData(self, source: QMimeData) -> bool:
+        return source.hasUrls() or source.hasImage() or super().canInsertFromMimeData(source)
+
+    def insertFromMimeData(self, source: QMimeData) -> None:
+        processed_something = False # Flag untuk menandai apakah kita sudah menangani sesuatu
+
+        if source.hasUrls():
+            for url in source.urls():
+                if url.isLocalFile():
+                    file_path = url.toLocalFile()
+                    print(f"File pasted from URL: {file_path}")
+                    if hasattr(self.parent_chat_window, 'send_file') and self.parent_chat_window.current_conversation:
+                        self.parent_chat_window.send_file(file_path)
+                        processed_something = True
+                    else:
+                        print("Cannot send pasted file: No active conversation or send_file method missing.")
+            
+            if processed_something: # Jika file dari URL sudah diproses, jangan lakukan apa-apa lagi.
+                return 
+            # Jika URL bukan file lokal, atau tidak ada file lokal, biarkan super() yang menangani jika ada teks.
+            # Jika tidak, paste URL sebagai teks jika itu yang diinginkan (biasanya tidak untuk file paste)
+
+        elif source.hasImage(): # MENANGANI GAMBAR DARI CLIPBOARD (misalnya Snipping Tool)
+            image: QImage = source.imageData() # Dapatkan QImage
+            if image and not image.isNull():
+                try:
+                    # Buat nama file temporer yang unik
+                    # Menggunakan direktori cache aplikasi adalah praktik yang baik
+                    cache_dir = QStandardPaths.writableLocation(QStandardPaths.CacheLocation)
+                    if not cache_dir: # Fallback ke direktori temp sistem jika cache_dir tidak tersedia
+                        cache_dir = QDir.tempPath()
+                    
+                    app_temp_subdir = os.path.join(cache_dir, "ITSupportChatCache") # Subdirektori khusus
+                    if not os.path.exists(app_temp_subdir):
+                        os.makedirs(app_temp_subdir, exist_ok=True)
+
+                    filename = f"pasted_image_{int(time.time() * 1000)}.png" # Nama file dengan timestamp milidetik
+                    temp_file_path = os.path.join(app_temp_subdir, filename)
+
+                    # Simpan QImage ke file temporer (PNG adalah format yang baik untuk screenshot)
+                    if image.save(temp_file_path, "PNG", quality=90): # quality 0-100, -1 default
+                        print(f"Pasted image saved to temporary file: {temp_file_path}")
+                        if hasattr(self.parent_chat_window, 'send_file') and self.parent_chat_window.current_conversation:
+                            self.parent_chat_window.send_file(temp_file_path)
+                            # Di sini, kita tidak langsung menghapus temp_file_path karena send_file mungkin asinkron.
+                            # Manajemen file temporer bisa lebih kompleks (misalnya, hapus setelah upload berhasil,
+                            # atau bersihkan folder temp saat aplikasi ditutup/dimulai).
+                            # Untuk saat ini, file akan tersimpan di folder cache/temp.
+                            processed_something = True
+                        else:
+                            print("Cannot send pasted image: No active conversation or send_file method missing.")
+                    else:
+                        print(f"Failed to save pasted image to {temp_file_path}. Error: {image.save(temp_file_path, 'PNG')}")
+                except Exception as e:
+                    print(f"Error processing pasted image: {e}")
+            
+            if processed_something: # Jika gambar dari clipboard sudah diproses, jangan lakukan apa-apa lagi.
+                return
+
+        # Jika tidak ada URL file lokal atau gambar yang diproses,
+        # atau jika ada data lain (seperti teks), biarkan handler default yang bekerja.
+        if not processed_something:
+            super().insertFromMimeData(source)
+            
 class WebSocketThread(threading.Thread):
     def __init__(self, chat_window):
         super().__init__()
@@ -94,66 +177,81 @@ class WebSocketThread(threading.Thread):
             print("DEBUG: WebSocketThread (python-socketio) - Klien Socket.IO tidak terhubung atau sudah terputus.")
 
 class BubbleMessage(QLabel):
-    def __init__(self, text, is_me, sender_name, time, parent=None):
+    def __init__(self, text, is_me, sender_name, time, file_path=None, parent=None):
         super().__init__(parent)
         self.is_me = is_me
         self.sender_name = sender_name
         self.time = time
-        
+        self.original_file_path = file_path # Simpan path asli dari DB (mis. uploads/namafile.ext)
+        self.filename_to_download = os.path.basename(file_path) if file_path else None # Hanya nama file (mis. namafile.ext)
+        self.msg_id = None
+
         self.setWordWrap(True)
         self.setMargin(15)
         self.setTextFormat(Qt.RichText)
         
-        # Create message bubble styling similar to the image
+        display_text = text
+
+        if self.filename_to_download and text.startswith("[File:"):
+            actual_filename_in_text = text[len("[File: "):-1]
+            display_text = f"<a href='#' style='color: inherit; text-decoration: underline;'>📄 File: {actual_filename_in_text}</a>"
+
         if is_me:
             message_html = f"""
             <div style='font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 15px; line-height: 1;'>
-                <div style='color: #FFFFFF; margin-bottom: 8px;'>{text}</div>
-                <div style='color: rgba(255,255,255,0.8); font-size: 11px; text-align: right; margin-top: 4px;'>
-                    {time}
-                </div>
-            </div>
-            """
+                <div style='color: #FFFFFF; margin-bottom: 8px;'>{display_text}</div>
+                <div style='color: rgba(255,255,255,0.8); font-size: 11px; text-align: right; margin-top: 4px;'>{time}</div>
+            </div>"""
             self.setStyleSheet("""
                 BubbleMessage {
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
-                        stop:0 #4A90E2, stop:1 #357ABD);
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4A90E2, stop:1 #357ABD);
                     border-radius: 18px;
-                    margin: 4px 60px 4px 4px;
+                    margin: 4px 4px 4px 60px; 
                     max-width: 400px;
-                }
-            """)
-        else:
+                }""")
+        else: 
             message_html = f"""
             <div style='font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 15px; line-height: 1;'>
-
-                <div style='color: #2C3E50; margin-bottom: 8px;'>{text}</div>
-                <div style='color: #95A5A6; font-size: 11px; text-align: left; margin-top: 4px;'>
-                    {time}
-                </div>
-            </div>
-            """
+                <div style='color: #2C3E50; margin-bottom: 8px;'>{display_text}</div>
+                <div style='color: #95A5A6; font-size: 11px; text-align: left; margin-top: 4px;'>{time}</div>
+            </div>"""
             self.setStyleSheet("""
                 BubbleMessage {
-                    background-color: #FFFFFF;
-                    border: 1px solid #E8ECEF;
-                    border-radius: 18px;
-                    margin: 4px 4px 4px 60px;
+                    background-color: #FFFFFF; border: 1px solid #E8ECEF; border-radius: 18px;
+                    margin: 4px 60px 4px 4px; 
                     max-width: 400px;
-                }
-            """)
-        
+                }""")
+
         self.setText(message_html)
-        self.setAlignment(Qt.AlignLeft if not is_me else Qt.AlignRight)
         self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
-        
-        # Add subtle shadow
+
         shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(8)
-        shadow.setColor(QColor(0, 0, 0, 20))
-        shadow.setOffset(0, 2)
+        shadow.setBlurRadius(8); shadow.setColor(QColor(0, 0, 0, 20)); shadow.setOffset(0, 2)
         self.setGraphicsEffect(shadow)
 
+        if self.filename_to_download:
+            self.setOpenExternalLinks(False) 
+            # self.linkActivated.connect(self.handle_link_click) # Tidak perlu jika mousePressEvent cukup
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and self.filename_to_download:
+            download_url_str = f"{BASE_URL}/uploads/{self.filename_to_download}"
+            print(f"Attempting to open URL for download: {download_url_str}")
+            QDesktopServices.openUrl(QUrl(download_url_str))
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def enterEvent(self, event):
+        if self.filename_to_download:
+            self.setCursor(Qt.PointingHandCursor)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        if self.filename_to_download:
+            self.unsetCursor()
+        super().leaveEvent(event)
+ 
 class ConversationItem(QWidget):
     # Versi ini menggunakan 'last_message' yang di-pass saat inisialisasi
     def __init__(self, conversation_data, user_role, last_message_text="Click to start conversation"): # Terima last_message_text
@@ -531,10 +629,10 @@ class ChatWindow(QWidget):
         input_layout.setContentsMargins(24, 16, 24, 16)
         input_layout.setSpacing(12)
         
-        # Attach button
-        attach_btn = QPushButton("📎")
-        attach_btn.setFixedSize(40, 40)
-        attach_btn.setStyleSheet("""
+    # Ganti attach_btn menjadi:
+        self.attach_btn = QPushButton("📎")
+        self.attach_btn.setFixedSize(40, 40)
+        self.attach_btn.setStyleSheet("""
             QPushButton {
                 background-color: #F1F3F4;
                 border: none;
@@ -545,12 +643,14 @@ class ChatWindow(QWidget):
                 background-color: #E8ECEF;
             }
         """)
-        input_layout.addWidget(attach_btn)
+        self.attach_btn.clicked.connect(self.attach_file)
+        input_layout.addWidget(self.attach_btn)
         
         # Message input
-        self.message_input = QTextEdit()
+        # self.message_input = QTextEdit()
+        self.message_input = FilePasteTextEdit(self)
         self.message_input.setMaximumHeight(48)
-        self.message_input.setPlaceholderText("Add a comment...")
+        self.message_input.setPlaceholderText("Add a comment or paste a file...")
         self.message_input.setStyleSheet("""
             QTextEdit {
                 background-color: #F1F3F4;
@@ -601,7 +701,45 @@ class ChatWindow(QWidget):
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             }
         """)
-    
+        
+
+    # Tambahkan metode ini dari it.py ke kelas ChatWindow di client.py
+    def attach_file(self):
+        if not self.current_conversation:
+            print("Silakan pilih percakapan terlebih dahulu.") # Pesan opsional untuk pengguna
+            return
+            
+        options = QFileDialog.Options()
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Pilih File untuk Dikirim", "", 
+            "Semua File (*);;Gambar (*.png *.jpg *.jpeg *.gif);;Video (*.mp4 *.mov);;Dokumen (*.pdf *.doc *.docx)",
+            options=options
+        )
+        
+        if file_path:
+            self.send_file(file_path) #
+
+    def send_file(self, file_path):
+        url = f"{BASE_URL}/upload_file" #
+        try:
+            # Penting: Kirim nama file asli ke server agar bisa digunakan di sisi penerima
+            # dan disimpan dengan benar di server.
+            with open(file_path, 'rb') as f:
+                files = {'file': (os.path.basename(file_path), f, 'application/octet-stream')} # Menyertakan nama file dan tipe MIME opsional
+                data = {
+                    'conversation_id': str(self.current_conversation),
+                    'sender_id': str(self.user['id'])
+                }
+                
+                response = requests.post(url, files=files, data=data) #
+                if response.status_code == 200:
+                    print("File berhasil dikirim")
+                    # Server akan mengirim event socket, yang akan menambahkan pesan ke UI.
+                else:
+                    print(f"Gagal mengirim file: {response.status_code} - {response.text}")
+        except Exception as e:
+            print(f"Terjadi kesalahan saat mengirim file: {e}")
+            
     def mark_conversation_unread(self, conversation_id, new_message_text=None):
         print(f"DEBUG: Menandai belum dibaca untuk conv ID: {conversation_id}") # DEBUG
         self.unread_map[conversation_id] = True 
@@ -709,8 +847,10 @@ class ChatWindow(QWidget):
         self.chat_status.setText("🟢 Active now" if conv_data.get('status') != 'closed' else "⚫ Closed") #
         self.chat_avatar.setText(name[0].upper() if name else "?") #
         
-        self.load_messages(conversation_id) # Muat pesan
-        
+        self.load_messages(conversation_id , scroll_to_bottom=True)
+        # Reset style saat dibuka
+        item.setSelected(False)
+        conv_widget.setStyleSheet("")  # Hapus efek biru
         self.unread_map[conversation_id] = False
         
         # Reset style dasar ConversationItem
@@ -749,7 +889,7 @@ class ChatWindow(QWidget):
         conv_widget.setStyleSheet(default_style)
         print(f"DEBUG: ChatWindow - Percakapan {conversation_id} dipilih dan ditandai sudah dibaca.") # DEBUG
     
-    def load_messages(self, conversation_id):
+    def load_messages(self, conversation_id, scroll_to_bottom=False):
         print(f"DEBUG: ChatWindow - Memuat pesan untuk conv_id: {conversation_id}") # DEBUG
         try:
             response = requests.get(f"{BASE_URL}/get_messages/{conversation_id}", timeout=5)
@@ -779,8 +919,19 @@ class ChatWindow(QWidget):
                             msg_data['sender_id'] == self.user['id'],
                             msg_data['sender_name'],
                             msg_data['sent_at'],
-                            msg_data['id'] # msg_id penting untuk message_exists
+                            msg_data['id'], # msg_id penting untuk message_exists
+                            file_path=msg_data.get('file_path')
                         )
+                        # Create container for proper alignment
+                        container = QWidget()
+                        container_layout = QHBoxLayout()
+                        container_layout.setContentsMargins(0, 0, 0, 0)
+
+                    
+                    # Scroll to bottom
+                    if scroll_to_bottom:
+                        QTimer.singleShot(100, self.scroll_to_bottom)
+                        
                 QTimer.singleShot(100, self.scroll_to_bottom)
                 return self.message_cache.get(conversation_id, []) 
             else:
@@ -995,11 +1146,55 @@ class ChatWindow(QWidget):
                             return True
         return False
     
-    # Modifikasi add_message_to_ui untuk menyimpan msg_id
-    def add_message_to_ui(self, message_text, is_me, sender_name, sent_at, msg_id=None):
-        bubble = BubbleMessage(message_text, is_me, sender_name, sent_at)
-        bubble.msg_id = msg_id # Simpan ID pesan di bubble
+    def message_exists(self, msg_id):
+        if not msg_id: return False # Tidak bisa periksa jika tidak ada ID
+        for i in range(self.messages_layout.count() - 1): # Abaikan item 'stretch'
+            container_widget = self.messages_layout.itemAt(i).widget()
+            if container_widget:
+                bubble_widget = None
+                # Bubble adalah widget di dalam layout kontainer
+                for j in range(container_widget.layout().count()):
+                    item = container_widget.layout().itemAt(j)
+                    # Pastikan item adalah widget dan merupakan instance dari BubbleMessage
+                    if item and item.widget() and isinstance(item.widget(), BubbleMessage):
+                        bubble_widget = item.widget()
+                        break 
+                if bubble_widget and hasattr(bubble_widget, 'msg_id') and bubble_widget.msg_id == msg_id:
+                    return True
+        return False
+    
+    # def add_message_to_ui(self, message, is_me, sender_name, sent_at, scroll_to_bottom=True):
+    #     bubble = BubbleMessage(message, is_me, sender_name, sent_at)
         
+    #     # Create container for proper alignment
+    #     container = QWidget()
+    #     container_layout = QHBoxLayout()
+    #     container_layout.setContentsMargins(0, 0, 0, 0)
+        
+    #     if is_me:
+    #         container_layout.addStretch()
+    #         container_layout.addWidget(bubble)
+    #     else:
+    #         container_layout.addWidget(bubble)
+    #         container_layout.addStretch()
+        
+    #     container.setLayout(container_layout)
+    #     self.messages_layout.addWidget(container)
+    #     if scroll_to_bottom:
+    #         QTimer.singleShot(100, self.scroll_to_bottom)
+    
+    # Modifikasi add_message_to_ui untuk menerima seluruh dictionary pesan
+    def add_message_to_ui(self, msg_data, scroll_to_bottom=True): # Tanda tangan DIPERBARUI
+        is_me = msg_data['sender_id'] == self.user['id']
+        bubble = BubbleMessage(
+            msg_data['message'],
+            is_me,
+            msg_data['sender_name'],
+            msg_data['sent_at'],
+            file_path=msg_data.get('file_path') # DIPERBARUI: Teruskan file_path
+        )
+        bubble.msg_id = msg_data.get('id') # Simpan ID pesan di bubble
+
         container = QWidget()
         container_layout = QHBoxLayout(container)
         container_layout.setContentsMargins(0,0,0,0)
@@ -1011,9 +1206,12 @@ class ChatWindow(QWidget):
             container_layout.addWidget(bubble)
             container_layout.addStretch()
         
-        # Sisipkan sebelum stretch item terakhir di self.messages_layout
-        self.messages_layout.insertWidget(self.messages_layout.count() - 1, container)
-        QTimer.singleShot(100, self.scroll_to_bottom)
+        container.setLayout(container_layout)
+        # Masukkan sebelum item 'stretch'
+        self.messages_layout.insertWidget(self.messages_layout.count() - 1, container) 
+        
+        if scroll_to_bottom:
+            QTimer.singleShot(100, self.scroll_to_bottom)
     
     def send_message(self):
         if not self.current_conversation or not self.message_input.toPlainText().strip():
