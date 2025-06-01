@@ -22,14 +22,12 @@ from PyQt5.QtGui import QColor, QFont, QPainter, QBrush, QPalette, QPixmap, QIco
 # Suppress font warnings
 os.environ['QT_LOGGING_RULES'] = 'qt.qpa.fonts=false'
 
-IP = "192.168.79.125"
+IP = "192.168.45.137"
 # IP = "192.168.1.7"
 PORT = "5000"
 
 # BASE_URL = "http://localhost:5000"
-# BASE_URL = "http://192.168.46.6:5000"  # Ganti <IP_KANTOR> dengan IP server
-# BASE_URL = "http://192.168.45.137:5000"  # Ganti <IP_KANTOR> dengan IP server
-BASE_URL = f"http://{IP}:{PORT}"   
+BASE_URL = f"http://{IP}:{PORT}"  # Ganti <IP_KANTOR> dengan IP server
 
 def is_image_file(filename_or_path):
     if not filename_or_path:
@@ -146,20 +144,6 @@ class WebSocketThread(threading.Thread):
             self.chat_window.receive_message_signal.emit(data)
 
         
-    # def run(self):
-    #     ws = create_connection("ws://192.168.45.137:5000")
-    #     # ws = create_connection(f"ws://{BASE_URL.split('//')[1]}")
-    #     while self.running:
-    #         try:
-    #             message = ws.recv()
-    #             data = json.loads(message)
-    #             if data.get('event') == 'new_message':
-    #                 self.chat_window.receive_message_signal.emit(data['data'])
-    #         except Exception as e:
-    #             print("WebSocket error:", e)
-    #             break
-    #     ws.close()
-        
     def run(self):
         # MODIFIKASI DI SINI: Tambahkan /socket.io/ pada URL
         print(f"DEBUG: WebSocketThread (python-socketio) - Mencoba terhubung ke http://{IP}:{PORT}")
@@ -192,60 +176,6 @@ class WebSocketThread(threading.Thread):
         else:
             print("DEBUG: WebSocketThread (python-socketio) - Klien Socket.IO tidak terhubung atau sudah terputus.")
 
-# class BubbleMessage(QLabel):
-#     def __init__(self, text, is_me, sender_name, time, file_path=None, parent=None):
-#         super().__init__(parent)
-#         self.is_me = is_me
-#         self.sender_name = sender_name
-#         self.time = time
-#         self.file_path = file_path
-#         self.msg_id = None # Tambahkan untuk menyimpan ID pesan
-        
-#         self.setWordWrap(True)
-#         self.setMargin(15)
-#         self.setTextFormat(Qt.RichText)
-        
-#         display_text = text
-#         # Jika Anda ingin menampilkan ikon atau nama file yang lebih bersih dari path:
-#         # if self.file_path:
-#         #     display_text = f"📄 File: {os.path.basename(self.file_path)}" 
-#         # Namun, karena server sudah mengirimkan format "[File: namafile.ext]", kita bisa langsung gunakan 'text'.
-
-#         if is_me:
-#             message_html = f"""
-#             <div style='font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 15px; line-height: 1;'>
-#                 <div style='color: #FFFFFF; margin-bottom: 8px;'>{display_text}</div>
-#                 <div style='color: rgba(255,255,255,0.8); font-size: 11px; text-align: right; margin-top: 4px;'>{time}</div>
-#             </div>"""
-#             self.setStyleSheet("""
-#                 BubbleMessage {
-#                     background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4A90E2, stop:1 #357ABD);
-#                     border-radius: 18px;
-#                     margin: 4px 4px 4px 60px; /* Margin untuk pesan 'saya' di it.py */
-#                     max-width: 400px;
-#                 }""")
-#         else: # Pesan dari orang lain
-#             message_html = f"""
-#             <div style='font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 15px; line-height: 1;'>
-#                 <div style='color: #2C3E50; margin-bottom: 8px;'>{display_text}</div>
-#                 <div style='color: #95A5A6; font-size: 11px; text-align: left; margin-top: 4px;'>{time}</div>
-#             </div>"""
-#             self.setStyleSheet("""
-#                 BubbleMessage {
-#                     background-color: #FFFFFF; border: 1px solid #E8ECEF; border-radius: 18px;
-#                     margin: 4px 60px 4px 4px; /* Margin untuk pesan 'orang lain' di it.py */
-#                     max-width: 400px;
-#                 }""")
-
-#         self.setText(message_html)
-#         # Perataan (alignment) di it.py biasanya diatur oleh kontainer yang menambahkan addStretch.
-#         # self.setAlignment(Qt.AlignLeft if not is_me else Qt.AlignRight) # Mungkin tidak diperlukan jika kontainer sudah mengatur
-#         self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
-
-#         shadow = QGraphicsDropShadowEffect()
-#         shadow.setBlurRadius(8); shadow.setColor(QColor(0, 0, 0, 20)); shadow.setOffset(0, 2)
-#         self.setGraphicsEffect(shadow)
-        
 class BubbleMessage(QLabel):
     def __init__(self, text, is_me, sender_name, time, file_path=None, parent=None):
         super().__init__(parent)
@@ -321,6 +251,7 @@ class BubbleMessage(QLabel):
         if self.filename_to_download:
             self.unsetCursor()
         super().leaveEvent(event)
+
  
 class ConversationItem(QWidget):
     # Versi ini menggunakan 'last_message' yang di-pass saat inisialisasi
@@ -438,8 +369,6 @@ class ChatWindow(QWidget):
         self.ws_thread = WebSocketThread(self)
         self.ws_thread.start()
         
-
-
     def setup_ui(self):
         self.setWindowTitle(f"IT Support Chat - {self.user['full_name']} ({self.user['role'].title()})")
         self.resize(1200, 800)
@@ -773,8 +702,6 @@ class ChatWindow(QWidget):
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             }
         """)
-        
-
     # Tambahkan metode ini dari it.py ke kelas ChatWindow di client.py
     def attach_file(self):
         if not self.current_conversation:
@@ -812,8 +739,8 @@ class ChatWindow(QWidget):
                 else:
                     print(f"Gagal mengirim file: {response.status_code} - {response.text}")
         except Exception as e:
-            print(f"Terjadi kesalahan saat mengirim file: {e}")    
-            
+            print(f"Terjadi kesalahan saat mengirim file: {e}")     
+    
     def mark_conversation_unread(self, conversation_id, new_message_text=None):
         print(f"DEBUG: Menandai belum dibaca untuk conv ID: {conversation_id}") # DEBUG
         self.unread_map[conversation_id] = True 
@@ -840,14 +767,13 @@ class ChatWindow(QWidget):
                     """)
                     print(f"DEBUG: Teks preview_label di mark_unread: {widget.preview_label.text()}") # DEBUG
                 break # Keluar dari loop setelah item ditemukan dan diperbarui
+
                 
     def load_conversations(self):
         print(f"DEBUG: Memuat percakapan untuk user {self.user['id']}")
-        
         try: 
             response = requests.get(f"{BASE_URL}/get_conversations/{self.user['id']}")
             print(f"DEBUG: ChatWindow - Status load_conversations: {response.status_code}") # DEBUG
-            QTimer.singleShot(100, self.scroll_to_bottom)
             if response.status_code == 200:
                 try:
                     conversations = response.json()
@@ -898,7 +824,7 @@ class ChatWindow(QWidget):
             print(f"DEBUG: Error tak terduga di load_conversations: {e}")
 
     
-    def select_conversation(self, item ):
+    def select_conversation(self, item):
         if not item:
             print("DEBUG: ChatWindow - select_conversation dipanggil dengan item None") # DEBUG
             return
@@ -906,7 +832,7 @@ class ChatWindow(QWidget):
         conversation_id = item.data(Qt.UserRole)
         print(f"DEBUG: ChatWindow - Memilih percakapan ID: {conversation_id}") # DEBUG
         self.current_conversation = conversation_id
-        QTimer.singleShot(100, self.scroll_to_bottom)
+        
         conv_widget = self.conversation_list.itemWidget(item)
         if not conv_widget:
             print(f"DEBUG: ChatWindow - Tidak ada widget untuk item percakapan ID: {conversation_id}") # DEBUG
@@ -928,8 +854,6 @@ class ChatWindow(QWidget):
         # Reset style dasar ConversationItem
         default_item_style = ConversationItem(conv_data, self.user['role'], "").styleSheet() # Dapatkan style dasar
         conv_widget.setStyleSheet(default_item_style)
-        
-    
 
         
         # Reset tampilan preview_label ke pesan terakhir yang sebenarnya
@@ -952,11 +876,10 @@ class ChatWindow(QWidget):
                     /* Hapus properti CSS penyebab warning jika masih ada */
                 }
             """)
-            
-        
-            
+
+
+    
     def load_messages(self, conversation_id, scroll_to_bottom=False):
-        
         print(f"DEBUG: ChatWindow - Memuat pesan untuk conv_id: {conversation_id}") # DEBUG
         try:
             response = requests.get(f"{BASE_URL}/get_messages/{conversation_id}", timeout=5)
@@ -989,8 +912,8 @@ class ChatWindow(QWidget):
                             msg_data['id'], # msg_id penting untuk message_exists
                             msg_data['file_path'] # DIPERBARUI: Teruskan file_path
                         )
-                        
-                
+                if scroll_to_bottom:
+                    QTimer.singleShot(100, self.scroll_to_bottom)
                 return self.message_cache.get(conversation_id, []) 
             else:
                 print(f"DEBUG: ChatWindow - Gagal memuat pesan: {response.status_code} - {response.text}") # DEBUG
@@ -998,7 +921,6 @@ class ChatWindow(QWidget):
             print(f"DEBUG: ChatWindow - Error koneksi saat memuat pesan: {e}") # DEBUG
         except Exception as e:
             print(f"DEBUG: ChatWindow - Error tak terduga di load_messages: {e}") # DEBUG
-        
             
         # Jika gagal, pastikan cache untuk conversation_id ini kosong atau sesuai keadaan
         self.message_cache[conversation_id] = []
@@ -1206,31 +1128,9 @@ class ChatWindow(QWidget):
                             return True
         return False
     
-
-    
-    # def add_message_to_ui(self, message, is_me, sender_name, sent_at, scroll_to_bottom=True):
-    #     bubble = BubbleMessage(message, is_me, sender_name, sent_at)
-        
-    #     # Create container for proper alignment
-    #     container = QWidget()
-    #     container_layout = QHBoxLayout()
-    #     container_layout.setContentsMargins(0, 0, 0, 0)
-        
-    #     if is_me:
-    #         container_layout.addStretch()
-    #         container_layout.addWidget(bubble)
-    #     else:
-    #         container_layout.addWidget(bubble)
-    #         container_layout.addStretch()
-        
-    #     container.setLayout(container_layout)
-    #     self.messages_layout.addWidget(container)
-    #     if scroll_to_bottom:
-    #         QTimer.singleShot(100, self.scroll_to_bottom)
-    
-    # Modifikasi add_message_to_ui untuk menerima seluruh dictionary pesan
-    def add_message_to_ui(self, message_text, is_me, sender_name, sent_at, msg_id=None, file_path=None, scroll_to_bottom=True ):
-        bubble = BubbleMessage(message_text, is_me, sender_name, sent_at, file_path=file_path) # Tambahkan file_path jika ada
+    # Modifikasi add_message_to_ui untuk menyimpan msg_id
+    def add_message_to_ui(self, message_text, is_me, sender_name, sent_at, msg_id=None, file_path=None):
+        bubble = BubbleMessage(message_text, is_me, sender_name, sent_at)
         bubble.msg_id = msg_id # Simpan ID pesan di bubble
         
         container = QWidget()
@@ -1246,10 +1146,7 @@ class ChatWindow(QWidget):
         
         # Sisipkan sebelum stretch item terakhir di self.messages_layout
         self.messages_layout.insertWidget(self.messages_layout.count() - 1, container)
-        if scroll_to_bottom:
-            QTimer.singleShot(100, self.scroll_to_bottom)
-            
-
+        QTimer.singleShot(100, self.scroll_to_bottom)
     
     def send_message(self):
         if not self.current_conversation or not self.message_input.toPlainText().strip():
