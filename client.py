@@ -22,12 +22,12 @@ from PyQt5.QtGui import QColor, QFont, QPainter, QBrush, QPalette, QPixmap, QIco
 # Suppress font warnings
 os.environ['QT_LOGGING_RULES'] = 'qt.qpa.fonts=false'
 
-IP = "192.168.79.125" 
+IP = "192.168.45.248" 
 # IP = "192.168.1.7" 
 PORT = "5000"
 
 # BASE_URL = "http://localhost:5000"
-BASE_URL = "http://192.168.79.125:5000"  # Ganti <IP_KANTOR> dengan IP server
+BASE_URL = "http://192.168.45.248:5000"  # Ganti <IP_KANTOR> dengan IP server
 # BASE_URL = "http://192.168.1.7:5000"  # Ganti <IP_KANTOR> dengan IP server
 
 class FilePasteTextEdit(QTextEdit):
