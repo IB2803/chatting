@@ -22,12 +22,12 @@ from PyQt5.QtGui import QColor, QFont, QPainter, QBrush, QPalette, QPixmap, QIco
 # Suppress font warnings
 os.environ['QT_LOGGING_RULES'] = 'qt.qpa.fonts=false'
 
-IP = "192.168.45.248" 
+IP = "192.168.47.63" 
 # IP = "192.168.1.7" 
 PORT = "5000"
 
 # BASE_URL = "http://localhost:5000"
-BASE_URL = "http://192.168.45.248:5000"  # Ganti <IP_KANTOR> dengan IP server
+BASE_URL = "http://192.168.47.63:5000"  # Ganti <IP_KANTOR> dengan IP server
 # BASE_URL = "http://192.168.1.7:5000"  # Ganti <IP_KANTOR> dengan IP server
 
 class FilePasteTextEdit(QTextEdit):
@@ -139,76 +139,51 @@ class WebSocketThread(threading.Thread):
             self.chat_window.receive_message_signal.emit(data)
 
         
-    def run(self):
-        ws = create_connection("ws://192.168.56.1:5000")
-        # ws = create_connection(f"ws://{BASE_URL.split('//')[1]}")
-        while self.running:
-            try:
-                message = ws.recv()
-                data = json.loads(message)
-                if data.get('event') == 'new_message':
-                    self.chat_window.receive_message_signal.emit(data['data'])
-            except Exception as e:
-                print("WebSocket error:", e)
-                break
-        ws.close()
-
-
+    # def run(self):
+    #     ws = create_connection("ws://192.168.45.137:5000")
+    #     # ws = create_connection(f"ws://{BASE_URL.split('//')[1]}")
+    #     while self.running:
+    #         try:
+    #             message = ws.recv()
+    #             data = json.loads(message)
+    #             if data.get('event') == 'new_message':
+    #                 self.chat_window.receive_message_signal.emit(data['data'])
+    #         except Exception as e:
+    #             print("WebSocket error:", e)
+    #             break
+    #     ws.close()
         
-# In client.py
-# class BubbleMessage(QLabel):
-#     # Tambahkan file_path=None ke konstruktor
-#     def __init__(self, text, is_me, sender_name, time, file_path=None, parent=None): # DIPERBARUI
-#         super().__init__(parent)
-#         self.is_me = is_me
-#         self.sender_name = sender_name
-#         self.time = time
-#         self.file_path = file_path # DITAMBAHKAN
-#         self.msg_id = None # Tambahkan untuk menyimpan ID pesan
+    def run(self):
+        # MODIFIKASI DI SINI: Tambahkan /socket.io/ pada URL
+        print(f"DEBUG: WebSocketThread (python-socketio) - Mencoba terhubung ke http://{IP}:{PORT}")
+        try:
+            # Lakukan koneksi. Pustaka akan menangani handshake Engine.IO/Socket.IO.
+            # Ia akan mencoba path default /socket.io/
+            # 'transports=['websocket']' memaksa penggunaan WebSocket.
+            self.sio.connect(f"http://{IP}:{PORT}", transports=['websocket'])
+            
+            # sio.wait() akan menjaga thread ini tetap aktif dan memproses event
+            # sampai sio.disconnect() dipanggil atau koneksi terputus.
+            self.sio.wait()
+            print("DEBUG: WebSocketThread (python-socketio) - sio.wait() telah berhenti/unblocked.")
 
-#         self.setWordWrap(True)
-#         self.setMargin(15)
-#         self.setTextFormat(Qt.RichText)
+        except socketio.exceptions.ConnectionError as e:
+            print(f"DEBUG: WebSocketThread (python-socketio) - Kesalahan koneksi: {e}")
+        except Exception as e_run:
+            # Tangkap error lain yang mungkin terjadi selama run
+            print(f"DEBUG: WebSocketThread (python-socketio) - Error tak terduga di run(): {e_run}")
+        finally:
+            # Ini mungkin tidak akan tercapai jika sio.wait() berjalan terus atau jika error tidak tertangkap
+            # Penutupan koneksi utama ada di metode stop().
+            print("DEBUG: WebSocketThread (python-socketio) - Thread 'run' selesai atau keluar dari try-except.")
 
-#         display_text = text
-#         # if self.file_path:
-#         #     display_text = f"📄 File: {os.path.basename(self.file_path)}"
-
-#         if is_me:
-#             message_html = f"""
-#             <div style='font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 12px; line-height: 1; white-space: normal; word-wrap: break-word; max-width: 100%;'>
-#                 <div style='color: #FFFFFF; margin-bottom: 10px; '>{display_text}</div>
-#                 <div style='color: rgba(255,255,255,0.8); font-size: 11px; text-align: right; margin-top: 4px;'>{time}</div>
-#             </div>"""
-#             self.setStyleSheet("""
-#                 BubbleMessage {
-#                     background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4A90E2, stop:1 #357ABD);
-#                     border-radius: 18px;
-#                     margin: 4px 4px 4px 4px; /* Margin asli dari client.py */
-#                     max-width: 400px;
-#                 }""")
-#         else: # Pesan dari orang lain
-#             message_html = f"""
-#             <div style='font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 12px; line-height: 1; white-space: normal; word-wrap: break-word; max-width: 100%;'>
-#                 <div style='color: #2C3E50; margin-bottom: 10px; '>{display_text}</div>
-#                 <div style='color: #95A5A6; font-size: 11px; text-align: left; margin-top: 4px;'>{time}</div>
-#             </div>"""
-#             self.setStyleSheet("""
-#                 BubbleMessage {
-#                     background-color: #FFFFFF; border: 1px solid #E8ECEF; border-radius: 18px;
-#                     margin: 4px 4px 4px 4px; /* Margin asli dari client.py */
-#                     max-width: 400px;
-#                 }""")
-
-#         self.setText(message_html)
-#         self.setWordWrap(True)
-#         self.setMaximumWidth(400)
-#         self.setAlignment(Qt.AlignLeft if not is_me else Qt.AlignRight) # client.py menggunakan perataan langsung
-#         self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
-
-#         shadow = QGraphicsDropShadowEffect()
-#         shadow.setBlurRadius(8); shadow.setColor(QColor(0, 0, 0, 20)); shadow.setOffset(0, 2)
-#         self.setGraphicsEffect(shadow)
+    def stop(self):
+        print("DEBUG: WebSocketThread (python-socketio) - Metode stop() dipanggil.")
+        if self.sio and self.sio.connected:
+            print("DEBUG: WebSocketThread (python-socketio) - Memutuskan koneksi Socket.IO...")
+            self.sio.disconnect()
+        else:
+            print("DEBUG: WebSocketThread (python-socketio) - Klien Socket.IO tidak terhubung atau sudah terputus.")
 
 
 class BubbleMessage(QLabel):
@@ -369,7 +344,8 @@ class ConversationItem(QWidget):
         # Hover effect
         self.setStyleSheet("""
             ConversationItem {
-                background-color: transparent;
+                background-color: #4A90E2;
+                border: 20px solid #4A90E2;
                 border-radius: 8px;
             }
             ConversationItem:hover {
@@ -391,8 +367,8 @@ class ChatWindow(QWidget):
         
         # Timer untuk refresh
         self.timer = QTimer(self)
-        self.timer.timeout.connect(self.refresh_messages)
-        self.timer.start(3000)
+        # self.timer.timeout.connect(self.refresh_messages)
+        # self.timer.start(3000)
         
         # Setup WebSocket
         self.receive_message_signal.connect(self.handle_received_message)
@@ -402,8 +378,8 @@ class ChatWindow(QWidget):
     
     def setup_ui(self):
         self.setWindowTitle(f"IT Support Chat - {self.user['full_name']} ({self.user['role'].title()})")
-        # self.resize(500, 700)
-        self.setFixedSize(600, 900)
+        self.resize(600, 700)
+        # self.setFixedSize(600, 900)
         
         # Main layout
         main_layout = QHBoxLayout()
@@ -500,17 +476,18 @@ class ChatWindow(QWidget):
             QListWidget::item {
                 border: none;
                 padding: 0px;
-                margin: 0px;
-            }
+                margin: 0px; 
+            }     
             QListWidget::item:selected {
-                background-color: #EBF3FF;
-                border-left: 3px solid #4A90E2;
+                background-color: #EAF3FF; /* biru muda */
+                
+                border: 20px solid #4A90E2 transparent;
             }
         """)
         self.conversation_list.itemClicked.connect(self.select_conversation)
         sidebar_layout.addWidget(self.conversation_list)
         
-        # New chat button (for employees)
+        # New chat button (for employees                   )  
         # if self.user['role'] == 'employee':
         #     button_widget = QWidget()
         #     button_widget.setFixedHeight(80)
@@ -558,7 +535,7 @@ class ChatWindow(QWidget):
         self.chat_header_widget.setStyleSheet("""
             QWidget {
                 background-color: #3D82CA;
-                border-bottom: 1px solid #E8ECEF;
+                
             }
         """)
         
@@ -946,21 +923,21 @@ class ChatWindow(QWidget):
             if scroll_to_bottom:
                 QTimer.singleShot(100, self.scroll_to_bottom)
 
-    def handle_received_message(self, data): # data adalah dict berisi detail pesan
-        conv_id = data['conversation_id'] #
-        print("📨 Pesan baru diterima (Client):", data)
+    # def handle_received_message(self, data): # data adalah dict berisi detail pesan
+    #     conv_id = data['conversation_id'] #
+    #     print("📨 Pesan baru diterima (Client):", data)
 
-        message_details = data['message'] # Ini adalah dictionary untuk pesan itu sendiri
+    #     message_details = data['message'] # Ini adalah dictionary untuk pesan itu sendiri
 
-        if conv_id == self.current_conversation:
-            if not self.message_exists(message_details.get('id')): # Periksa menggunakan ID pesan
-                self.add_message_to_ui(message_details, scroll_to_bottom=True) # DIPERBARUI
+    #     if conv_id == self.current_conversation:
+    #         if not self.message_exists(message_details.get('id')): # Periksa menggunakan ID pesan
+    #             self.add_message_to_ui(message_details, scroll_to_bottom=True) # DIPERBARUI
                 
-                scrollbar = self.scroll_area.verticalScrollBar()
-                if scrollbar.value() >= scrollbar.maximum() - 20:
-                    QTimer.singleShot(100, self.scroll_to_bottom)
-        else:
-            self.mark_conversation_unread(data['conversation_id']) # Panggil dengan conv_id
+    #             scrollbar = self.scroll_area.verticalScrollBar()
+    #             if scrollbar.value() >= scrollbar.maximum() - 20:
+    #                 QTimer.singleShot(100, self.scroll_to_bottom)
+    #     else:
+    #         self.mark_conversation_unread(data['conversation_id']) # Panggil dengan conv_id
 
     # Modifikasi add_message_to_ui untuk menerima seluruh dictionary pesan
     def add_message_to_ui(self, msg_data, scroll_to_bottom=True): # Tanda tangan DIPERBARUI, tambahkan scroll_to_bottom opsional
@@ -1077,7 +1054,8 @@ class ChatWindow(QWidget):
                     message_content.get('sender_id') == self.user['id'], 
                     message_content.get('sender_name'), 
                     message_content.get('sent_at'),
-                    message_content.get('id')
+                    message_content.get('id'),
+                    message_content.get('file_path')
                 )
         else: # Pesan untuk percakapan yang tidak aktif
             if item_found_in_sidebar:
@@ -1254,7 +1232,7 @@ class LoginWindow(QWidget):
         form_layout.addWidget(welcome_sub)
         
         # Username input
-        username_label = QLabel("Username")
+        username_label = QLabel("NIK (nomor induk karyawan)")
         username_label.setStyleSheet("""
             QLabel {
                 font-size: 14px;
@@ -1266,7 +1244,7 @@ class LoginWindow(QWidget):
         form_layout.addWidget(username_label)
         
         self.username_input = QLineEdit()
-        self.username_input.setPlaceholderText("Enter your username")
+        self.username_input.setPlaceholderText("Enter your NIK")
         self.username_input.setStyleSheet("""
             QLineEdit {
                 padding: 16px;
@@ -1356,7 +1334,7 @@ class LoginWindow(QWidget):
         form_layout.addStretch()
         
         # Footer
-        footer_label = QLabel("Need help? Contact your system administrator")
+        footer_label = QLabel("Copyright © 2025 @iqbal.rian & @Dvim261 . All rights reserved..")
         footer_label.setStyleSheet("""
             QLabel {
                 color: #95A5A6;

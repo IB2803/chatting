@@ -12,7 +12,7 @@ import os
 from werkzeug.utils import secure_filename
 from flask import Flask, request, jsonify, send_from_directory
 
-IP = "192.168.45.248"
+IP = "192.168.47.63"
 # IP = "192.168.1.7"
 PORT = "5000"
 
@@ -35,6 +35,111 @@ mysql = MySQL(app)
 # Helper function
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
+
+
+@app.route('/get_users_by_role/<string:role_name>', methods=['GET'])
+def get_users_by_role(role_name):
+    # Isi fungsi seperti yang sudah kita diskusikan sebelumnya
+    if role_name not in ['employee', 'technician']:
+        return jsonify({'success': False, 'message': 'Invalid role specified'}), 400
+
+    cur = mysql.connection.cursor()
+    try:
+        cur.execute("SELECT id, full_name FROM users WHERE role = %s ORDER BY full_name ASC", (role_name,))
+        users = [{'id': row[0], 'full_name': row[1]} for row in cur.fetchall()]
+        cur.close()
+        return jsonify({'success': True, 'users': users})
+    except Exception as e:
+        cur.close()
+        print(f"Error fetching users by role {role_name}: {e}") # Perhatikan output server jika ada error di sini
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/admin_create_conversation', methods=['POST'])
+def admin_create_conversation():
+    data = request.get_json()
+    employee_id = data.get('employee_id')
+    technician_id = data.get('technician_id')
+
+    if not employee_id or not technician_id:
+        return jsonify({'success': False, 'message': 'Employee ID and Technician ID are required'}), 400
+
+    cur = mysql.connection.cursor()
+    try:
+        # Validasi employee
+        cur.execute("SELECT role FROM users WHERE id = %s", (employee_id,))
+        employee_user = cur.fetchone()
+        if not employee_user or employee_user[0] != 'employee': #
+            cur.close()
+            return jsonify({'success': False, 'message': 'Invalid Employee ID or user is not an employee'}), 400
+
+        # Validasi technician
+        cur.execute("SELECT role FROM users WHERE id = %s", (technician_id,))
+        technician_user = cur.fetchone()
+        if not technician_user or technician_user[0] != 'technician': #
+            cur.close()
+            return jsonify({'success': False, 'message': 'Invalid Technician ID or user is not a technician'}), 400
+
+        # Opsional: Cek apakah sudah ada percakapan terbuka antara keduanya
+        cur.execute("SELECT id FROM conversations WHERE employee_id = %s AND technician_id = %s AND status = 'open'", (employee_id, technician_id)) #
+        if cur.fetchone():
+            cur.close()
+            return jsonify({'success': False, 'message': 'An open conversation already exists between these users'}), 409 # 409 Conflict
+
+        # Insert percakapan baru
+        cur.execute("""
+            INSERT INTO conversations (employee_id, technician_id, status, last_updated) 
+            VALUES (%s, %s, %s, NOW())
+        """, (employee_id, technician_id, 'open')) #
+        mysql.connection.commit()
+        conversation_id = cur.lastrowid
+
+        # Untuk memicu pembaruan di klien, idealnya server akan emit event Socket.IO
+        # ke employee_id dan technician_id yang terlibat.
+        # Untuk saat ini, klien akan melakukan refresh manual (load_conversations).
+        # Anda bisa menambahkan pembuatan pesan sistem awal di sini jika diperlukan.
+        
+        # Ambil detail percakapan yang baru dibuat untuk dikirim kembali jika perlu (misal, untuk langsung dibuka)
+        # atau cukup konfirmasi sukses.
+        cur.execute("""
+            SELECT 
+                c.id, 
+                c.status, 
+                e.full_name as employee_name, 
+                t.full_name as tech_name,
+                c.last_updated,
+                NULL as last_message_preview,  -- Pesan awal bisa null
+                c.last_updated as last_message_time 
+            FROM conversations c
+            JOIN users e ON c.employee_id = e.id
+            LEFT JOIN users t ON c.technician_id = t.id
+            WHERE c.id = %s
+        """, (conversation_id,))
+        new_conv_data_row = cur.fetchone()
+        cur.close()
+
+        if new_conv_data_row:
+            new_conv_details = {
+                'id': new_conv_data_row[0],
+                'status': new_conv_data_row[1],
+                'employee_name': new_conv_data_row[2],
+                'tech_name': new_conv_data_row[3],
+                'last_updated': new_conv_data_row[4].strftime('%Y-%m-%d %H:%M:%S'),
+                'last_message_preview': new_conv_data_row[5] if new_conv_data_row[5] else "Conversation started.",
+                'last_message_time': new_conv_data_row[6].strftime('%Y-%m-%d %H:%M:%S')
+            }
+            # Emit event ke semua IT client agar list mereka terupdate, atau minimal ke pembuatnya
+            socketio.emit('conversation_created', {'conversation_data': new_conv_details}, broadcast=True) # Contoh emit
+            return jsonify({'success': True, 'conversation_id': conversation_id, 'message': 'Conversation created successfully', 'conversation_details': new_conv_details})
+        else:
+            return jsonify({'success': True, 'conversation_id': conversation_id, 'message': 'Conversation created, but failed to fetch details.'})
+
+
+    except Exception as e:
+        mysql.connection.rollback()
+        cur.close()
+        print(f"Error in admin_create_conversation: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
 
 @app.route('/login', methods=['POST'])
 def login():
@@ -318,6 +423,70 @@ def upload_file():
 @app.route('/uploads/<path:filename>')
 def uploaded_file_serve(filename):
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+
+# ... (kode server.py yang sudah ada) ...
+
+@app.route('/add_user', methods=['POST'])
+def add_user():
+    data = request.get_json()
+    username = data.get('username')
+    full_name = data.get('full_name')
+    password = data.get('password') # Bisa kosong jika role employee
+    role = data.get('role')
+
+    # Validasi field inti
+    if not all([username, full_name, role]):
+        return jsonify({'success': False, 'message': 'Username, Full Name, and Role are required fields'}), 400
+
+    if role not in ['employee', 'technician']:
+        return jsonify({'success': False, 'message': 'Invalid role specified'}), 400
+
+    hashed_password = None # Default ke None (untuk employee tanpa password)
+
+    if role == 'technician':
+        if not password: # Password wajib untuk teknisi
+            return jsonify({'success': False, 'message': 'Password is required for technician role'}), 400
+        hashed_password = hash_password(password)
+    elif role == 'employee':
+        if password: # Jika employee mengisi password, kita hash
+            hashed_password = hash_password(password)
+        # Jika password kosong untuk employee, hashed_password tetap None
+
+    cur = mysql.connection.cursor()
+    try:
+        # Cek apakah username sudah ada
+        cur.execute("SELECT id FROM users WHERE username = %s", (username,))
+        if cur.fetchone():
+            cur.close()
+            return jsonify({'success': False, 'message': 'Username already exists'}), 409
+
+        # Insert pengguna baru
+        # Kolom password di DB harus bisa menerima NULL
+        cur.execute("""
+            INSERT INTO users (username, full_name, password, role)
+            VALUES (%s, %s, %s, %s)
+        """, (username, full_name, hashed_password, role))
+        mysql.connection.commit()
+        new_user_id = cur.lastrowid
+        cur.close()
+        return jsonify({'success': True, 'message': 'User added successfully', 'user_id': new_user_id})
+
+    except Exception as e:
+        mysql.connection.rollback()
+        cur.close()
+        print(f"Error adding user: {e}")
+        return jsonify({'success': False, 'message': f'Database error: {str(e)}'}), 500
+
+# ... (kode server.py yang sudah ada) ...
+
+
+
+# ... (sisa kode server.py) ...
+# ... (sisa kode server.py) ...
+
+
+
+
 
 if __name__ == '__main__':
     print("Starting server with Flask-SocketIO (eventlet should be auto-detected)...")
