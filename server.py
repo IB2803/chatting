@@ -12,7 +12,7 @@ import os
 from werkzeug.utils import secure_filename
 from flask import Flask, request, jsonify, send_from_directory
 
-IP = "192.168.47.63"
+IP = "192.168.79.125"
 # IP = "192.168.1.7"
 PORT = "5000"
 

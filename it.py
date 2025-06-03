@@ -7,6 +7,7 @@ import time
 import socketio
 from websocket import create_connection
 
+from PyQt5.QtMultimedia import QSoundEffect
 from PyQt5.QtWidgets import QFileDialog
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -22,7 +23,7 @@ from PyQt5.QtGui import QColor, QFont, QPainter, QBrush, QPalette, QPixmap, QIco
 # Suppress font warnings
 os.environ['QT_LOGGING_RULES'] = 'qt.qpa.fonts=false'
 
-IP = "192.168.47.63"
+IP = "192.168.79.125"
 # IP = "192.168.1.7"
 PORT = "5000"
 
@@ -420,6 +421,26 @@ class ChatWindow(QWidget):
         self.setup_ui()
         self.load_conversations() # Panggil setelah setup_ui
         
+            # --- INISIALISASI SUARA NOTIFIKASI ---
+        self.message_sound = QSoundEffect(self) # 'self' sebagai parent
+
+        # Tentukan path ke file suara
+        # Asumsi 'notification.wav' ada di direktori yang sama dengan script
+        sound_file_name = "akh.wav" 
+        # Path bisa juga: os.path.join("sounds", "notification.wav") jika di subfolder 'sounds'
+
+        # Dapatkan path direktori tempat script dijalankan
+        current_script_dir = os.path.dirname(os.path.abspath(__file__))
+        sound_file_path = os.path.join(current_script_dir, sound_file_name)
+
+        if os.path.exists(sound_file_path):
+            self.message_sound.setSource(QUrl.fromLocalFile(sound_file_path))
+            self.message_sound.setVolume(1.0)  # Atur volume antara 0.0 (sunyi) dan 1.0 (maks)
+            print(f"Sound effect loaded from: {sound_file_path}")
+        else:
+            print(f"WARNING: Sound file not found at '{sound_file_path}'. Sound notifications will be disabled.")
+            self.message_sound = None # Nonaktifkan jika file tidak ditemukan
+        # --- AKHIR INISIALISASI SUARA ---
         # Timer untuk refresh
         self.timer = QTimer(self)
         # self.timer.timeout.connect(self.refresh_messages)
@@ -641,8 +662,31 @@ class ChatWindow(QWidget):
             """)
             self.new_custom_conv_btn.clicked.connect(self.handle_new_custom_conversation_click)
             sidebar_layout.addWidget(self.new_custom_conv_btn)
-                
-        
+            
+        chat_header_layout = QHBoxLayout()
+        chat_header_layout.setContentsMargins(24, 15, 24, 15)        
+        #  Tombol "Back" untuk kembali ke daftar percakapan
+        self.back_button = QPushButton("⬅") # Atau gunakan QIcon jika punya ikon panah
+        self.back_button.setFixedSize(30, 30)
+        self.back_button.setStyleSheet("""
+            QPushButton {
+                color: white;
+                font-size: 20px;
+                font-weight: bold;
+                border: none;
+                border-radius: 15px; /* Membuatnya bulat */
+                background-color: transparent; /* Transparan awal */
+            }
+            QPushButton:hover {
+                background-color: rgba(255, 255, 255, 0.2); /* Efek hover */
+            }
+            QPushButton:pressed {
+                background-color: rgba(255, 255, 255, 0.3); /* Efek tekan */
+            }
+        """)
+        self.back_button.clicked.connect(self.go_back_to_selection_view)
+        self.back_button.setVisible(False) # Sembunyikan di awal, tampilkan saat chat dipilih
+        chat_header_layout.addWidget(self.back_button)
         
         
         
@@ -664,8 +708,7 @@ class ChatWindow(QWidget):
             }
         """)
         
-        chat_header_layout = QHBoxLayout()
-        chat_header_layout.setContentsMargins(24, 15, 24, 15)
+
         
         # User avatar and info
         self.chat_avatar = QLabel()
@@ -842,7 +885,30 @@ class ChatWindow(QWidget):
 # ...
     # Dalam kelas ChatWindow:
 # ...
-
+    def update_chat_input_active_state(self, active: bool):
+        """Mengatur status aktif/nonaktif untuk area input pesan."""
+        self.message_input.setEnabled(active)
+        self.send_btn.setEnabled(active)
+        self.attach_btn.setEnabled(active)
+        if active:
+            self.message_input.setPlaceholderText("Add a comment or paste a file...")
+        else:
+            self.message_input.setPlaceholderText("Select a conversation to chat")
+        # Seluruh input area bisa disembunyikan/ditampilkan jika diinginkan
+    def update_chat_input_active_state(self, active: bool):
+        """Mengatur status aktif/nonaktif untuk area input pesan."""
+        self.message_input.setEnabled(active)
+        self.send_btn.setEnabled(active)
+        self.attach_btn.setEnabled(active)
+        if active:
+            self.message_input.setPlaceholderText("Add a comment or paste a file...")
+        else:
+            self.message_input.setPlaceholderText("Select a conversation to chat")
+        # Seluruh input area bisa disembunyikan/ditampilkan jika diinginkan
+        # self.input_area_widget.setVisible(active) # Opsional, jika ingin menyembunyikan seluruh bar input
+    
+    
+    
     def handle_new_custom_conversation_click(self):
         dialog = CreateConversationDialog(self)
         if dialog.exec_() == QDialog.Accepted:
@@ -1084,7 +1150,8 @@ class ChatWindow(QWidget):
         if not item:
             print("DEBUG: ChatWindow - select_conversation dipanggil dengan item None") # DEBUG
             return
-
+        self.update_chat_input_active_state(True)
+        self.back_button.setVisible(True)
         conversation_id = item.data(Qt.UserRole)
         print(f"DEBUG: ChatWindow - Memilih percakapan ID: {conversation_id}") # DEBUG
         self.current_conversation = conversation_id
@@ -1106,7 +1173,7 @@ class ChatWindow(QWidget):
         
         self.load_messages(conversation_id, scroll_to_bottom=True) # Muat pesan
         self.unread_map[conversation_id] = False
-        
+        # item.setSelected(False) # Hapus highlight biru bawaan QListWidget
         # Reset style dasar ConversationItem
         default_item_style = ConversationItem(conv_data, self.user['role'], "").styleSheet() # Dapatkan style dasar
         conv_widget.setStyleSheet(default_item_style)
@@ -1135,7 +1202,30 @@ class ChatWindow(QWidget):
                 }
             """)
             
-        
+    def go_back_to_selection_view(self):
+        # 1. Bersihkan area pesan
+        while self.messages_layout.count() > 1: # Sisakan item 'stretch' di akhir
+            item = self.messages_layout.takeAt(0) # Ambil dari atas
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+        # 2. Reset header chat
+        self.chat_name.setText("Select a conversation")
+        self.chat_status.setText("Choose a chat to start messaging")
+        self.chat_avatar.setText("") # Kosongkan avatar
+        self.back_button.setVisible(False) # Sembunyikan tombol back lagi
+
+        # 3. Set current_conversation menjadi None
+        self.current_conversation = None
+
+        # 4. Nonaktifkan area input pesan
+        self.update_chat_input_active_state(False)
+
+        # 5. (Opsional) Hapus sorotan dari QListWidget jika ada
+        if self.conversation_list.currentItem():
+            self.conversation_list.currentItem().setSelected(False)
+            self.conversation_list.setCurrentItem(None) # Ini penting untuk menghapus fokus    
             
     def load_messages(self, conversation_id, scroll_to_bottom=False):
         
@@ -1199,7 +1289,11 @@ class ChatWindow(QWidget):
         conv_id = data['conversation_id']
         message_content = data['message'] # Ini dictionary: {id, message, sender_id, sender_name, sent_at}
         print(f"DEBUG: IT/handle_received_message - 📨 Pesan baru untuk conv_id {conv_id}: {message_content.get('message')}")
-
+        # --- MAINKAN SUARA JIKA PESAN DARI ORANG LAIN ---
+        if self.message_sound and message_content.get('sender_id') != self.user['id']:
+            self.message_sound.play()
+            # print("Playing notification sound.") # Debug
+        # --- AKHIR MAINKAN SUARA ---
         # 1. Tambahkan pesan ke cache
         if conv_id not in self.message_cache:
             self.message_cache[conv_id] = []
