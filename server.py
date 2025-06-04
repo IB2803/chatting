@@ -12,9 +12,11 @@ import os
 from werkzeug.utils import secure_filename
 from flask import Flask, request, jsonify, send_from_directory
 
-IP = "192.168.79.125"
+IP = "192.168.45.171"
 # IP = "192.168.1.7"
 PORT = "5000"
+
+
 
 app = Flask(__name__)
 CORS(app, resources={
@@ -40,18 +42,38 @@ def hash_password(password):
 @app.route('/get_users_by_role/<string:role_name>', methods=['GET'])
 def get_users_by_role(role_name):
     # Isi fungsi seperti yang sudah kita diskusikan sebelumnya
-    if role_name not in ['employee', 'technician']:
+    if role_name not in ['employee', 'technician', 'ga']:
         return jsonify({'success': False, 'message': 'Invalid role specified'}), 400
 
     cur = mysql.connection.cursor()
     try:
-        cur.execute("SELECT id, full_name FROM users WHERE role = %s ORDER BY full_name ASC", (role_name,))
+        query_sql = "SELECT id, full_name FROM users WHERE "
+        params = []
+
+        if role_name == 'technician':
+            # Jika client meminta 'technician', berikan daftar semua yang bisa jadi support
+            query_sql += "(role = %s )"
+            params.extend('technician')
+        elif role_name == 'employee':
+            query_sql += "role = %s"
+            params.append('employee')
+        # Jika Anda menambahkan 'ga' ke allowed_roles_for_path dan ingin endpoint khusus untuk list GA:
+        elif role_name == 'ga':
+            query_sql += "role = %s"
+            params.append('ga')
+        else:
+            # Ini seharusnya tidak terjadi jika validasi di atas sudah benar
+            cur.close()
+            return jsonify({'success': False, 'message': 'Internal server error: Unhandled role for query construction.'}), 500
+
+        query_sql += " ORDER BY full_name ASC"
+        cur.execute(query_sql, tuple(params))
         users = [{'id': row[0], 'full_name': row[1]} for row in cur.fetchall()]
         cur.close()
         return jsonify({'success': True, 'users': users})
     except Exception as e:
         cur.close()
-        print(f"Error fetching users by role {role_name}: {e}") # Perhatikan output server jika ada error di sini
+        print(f"Error fetching users by role (custom logic) {role_name}: {e}")
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/admin_create_conversation', methods=['POST'])
@@ -59,6 +81,7 @@ def admin_create_conversation():
     data = request.get_json()
     employee_id = data.get('employee_id')
     technician_id = data.get('technician_id')
+    ga_id = data.get('ga_id')  # Jika diperlukan, bisa ditambahkan validasi untuk GA
 
     if not employee_id or not technician_id:
         return jsonify({'success': False, 'message': 'Employee ID and Technician ID are required'}), 400
@@ -75,9 +98,9 @@ def admin_create_conversation():
         # Validasi technician
         cur.execute("SELECT role FROM users WHERE id = %s", (technician_id,))
         technician_user = cur.fetchone()
-        if not technician_user or technician_user[0] != 'technician': #
+        if not technician_user or technician_user[0] not in ['technician', 'ga']: #
             cur.close()
-            return jsonify({'success': False, 'message': 'Invalid Technician ID or user is not a technician'}), 400
+            return jsonify({'success': False, 'message': 'Invalid Technician/GA ID or user is not a technician or GA support role'}), 400
 
         # Opsional: Cek apakah sudah ada percakapan terbuka antara keduanya
         cur.execute("SELECT id FROM conversations WHERE employee_id = %s AND technician_id = %s AND status = 'open'", (employee_id, technician_id)) #
@@ -260,7 +283,7 @@ def create_conversation():
     cur = mysql.connection.cursor()
     cur.execute("""
         SELECT id FROM users 
-        WHERE role = 'technician' 
+        WHERE role = 'technician' OR role = 'ga' 
         ORDER BY RAND() LIMIT 1
     """)
     tech = cur.fetchone()
@@ -438,15 +461,17 @@ def add_user():
     if not all([username, full_name, role]):
         return jsonify({'success': False, 'message': 'Username, Full Name, and Role are required fields'}), 400
 
-    if role not in ['employee', 'technician']:
+    if role not in ['employee', 'technician', 'ga']:
         return jsonify({'success': False, 'message': 'Invalid role specified'}), 400
 
     hashed_password = None # Default ke None (untuk employee tanpa password)
 
-    if role == 'technician':
+    if role == 'technician' or role == 'ga':
         if not password: # Password wajib untuk teknisi
             return jsonify({'success': False, 'message': 'Password is required for technician role'}), 400
         hashed_password = hash_password(password)
+    
+        
     elif role == 'employee':
         if password: # Jika employee mengisi password, kita hash
             hashed_password = hash_password(password)

@@ -13,7 +13,7 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QListWidget, QTextEdit,
     QScrollArea, QFrame, QSizePolicy, QListWidgetItem, QGraphicsDropShadowEffect,
-    QFileDialog, QMessageBox, QComboBox, QDialog
+    QFileDialog, QMessageBox, QComboBox, QDialog, QSpacerItem, QSizePolicy
 )
 from PyQt5.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply # Untuk memuat gambar secara asinkron
 from PyQt5.QtCore import pyqtSignal, Qt, QTimer, QUrl, QMimeData, QDir, QStandardPaths
@@ -23,7 +23,7 @@ from PyQt5.QtGui import QColor, QFont, QPainter, QBrush, QPalette, QPixmap, QIco
 # Suppress font warnings
 os.environ['QT_LOGGING_RULES'] = 'qt.qpa.fonts=false'
 
-IP = "192.168.79.125"
+IP = "192.168.45.171"
 # IP = "192.168.1.7"
 PORT = "5000"
 
@@ -664,15 +664,17 @@ class ChatWindow(QWidget):
             sidebar_layout.addWidget(self.new_custom_conv_btn)
             
         chat_header_layout = QHBoxLayout()
-        chat_header_layout.setContentsMargins(24, 15, 24, 15)        
+        chat_header_layout.setContentsMargins(24, 15, 24, 20) 
+        # Spacer kiri (untuk atur posisi tombol ke kanan jika mau)
+      
         #  Tombol "Back" untuk kembali ke daftar percakapan
-        self.back_button = QPushButton("⬅") # Atau gunakan QIcon jika punya ikon panah
+        self.back_button = QPushButton("←") # Atau gunakan QIcon jika punya ikon panah
         self.back_button.setFixedSize(30, 30)
         self.back_button.setStyleSheet("""
             QPushButton {
                 color: white;
-                font-size: 20px;
-                font-weight: bold;
+                font-size: 30px;
+                font-weight:  600;
                 border: none;
                 border-radius: 15px; /* Membuatnya bulat */
                 background-color: transparent; /* Transparan awal */
