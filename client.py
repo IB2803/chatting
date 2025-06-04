@@ -198,8 +198,12 @@ class BubbleMessage(QLabel):
         self.setWordWrap(True)
         self.setMargin(15)
         self.setTextFormat(Qt.RichText)
+        
+        import html
+        processed_text = html.escape(text) # Pertama, escape HTML entities seperti <, >, &
+        display_text = processed_text.replace('\n', '<br>')
 
-        display_text = text # Server sudah mengirim format [File: namafile.ext]
+        # display_text = text # Server sudah mengirim format [File: namafile.ext]
 
         # Tambahkan sedikit style jika ini adalah file untuk membuatnya terlihat seperti link
         if self.filename_to_download and text.startswith("[File:"):
