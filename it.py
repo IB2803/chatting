@@ -22,7 +22,7 @@ from PyQt5.QtGui import QColor, QFont, QPainter, QBrush, QPalette, QPixmap, QIco
 # Suppress font warnings
 os.environ['QT_LOGGING_RULES'] = 'qt.qpa.fonts=false'
 
-IP = "192.168.45.171"
+IP = "192.168.79.125"
 # IP = "192.168.1.7"
 PORT = "5000"
 
@@ -118,6 +118,13 @@ class WebSocketThread(threading.Thread):
         
     def setup_event_handlers(self):
         # Handler untuk event koneksi berhasil
+        @self.sio.on('conversation_created') # Event baru dari server
+        def on_conversation_created(data):
+            print(f"DEBUG: WebSocketThread (python-socketio) - Menerima 'conversation_created': {data}")
+            # Emit sinyal ke ChatWindow dengan payload ini.
+            # ChatWindow akan membutuhkan metode baru untuk menangani ini.
+            self.chat_window.new_conversation_signal.emit(data) # Buat sinyal baru
+
         @self.sio.event
         def connect():
             print("DEBUG: WebSocketThread (python-socketio) - Terhubung ke server Socket.IO!")
@@ -348,7 +355,7 @@ class ConversationItem(QWidget):
 
 class ChatWindow(QWidget):
     receive_message_signal = pyqtSignal(dict)
-    
+    new_conversation_signal = pyqtSignal(dict)
     def __init__(self, user, parent=None):
         super().__init__(parent)
         self.user = user
@@ -359,6 +366,9 @@ class ChatWindow(QWidget):
         if not self.current_conversation:
             self.chat_options_button.hide()
         self.load_conversations() # Panggil setelah setup_ui
+        
+        
+        
         
             # --- INISIALISASI SUARA NOTIFIKASI ---
         self.message_sound = QSoundEffect(self) # 'self' sebagai parent
@@ -379,6 +389,8 @@ class ChatWindow(QWidget):
         else:
             print(f"WARNING: Sound file not found at '{sound_file_path}'. Sound notifications will be disabled.")
             self.message_sound = None # Nonaktifkan jika file tidak ditemukan
+            
+        self.new_conversation_signal.connect(self.handle_new_conversation_added) # Handler baru
         # --- AKHIR INISIALISASI SUARA ---
         # Timer untuk refresh
         self.timer = QTimer(self)
@@ -401,7 +413,7 @@ class ChatWindow(QWidget):
 
         
     def setup_ui(self):
-        self.setWindowTitle(f"IT Support Chat - {self.user['full_name']} ({self.user['role'].title()})")
+        self.setWindowTitle(f"IT Chat - {self.user['full_name']} ({self.user['role'].title()})")
         self.resize(1200, 800)
         
         # Main layout
@@ -517,34 +529,47 @@ class ChatWindow(QWidget):
         
         # Tombol "Add User" (jika hanya untuk technician/admin)
         if self.user['role'] == 'technician': # Misal hanya teknisi yang bisa tambah user
-            self.add_user_btn = QPushButton("👤 Add User")
-            # ... (style dan connect add_user_btn seperti sebelumnya) ...
-            self.add_user_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #2ECC71; color: white; border: none;
-                    padding: 10px; border-radius: 18px; font-size: 13px;
-                    font-weight: 500; margin: 5px 20px;
-                }
-                QPushButton:hover { background-color: #27AE60; }
-                QPushButton:pressed { background-color: #1E8449; }
-            """)
-            self.add_user_btn.clicked.connect(self.handle_add_user_button_click)
-            sidebar_layout.addWidget(self.add_user_btn)
+            # self.add_user_btn = QPushButton("👤 Add User")
+            # # ... (style dan connect add_user_btn seperti sebelumnya) ...
+            # self.add_user_btn.setStyleSheet("""
+            #     QPushButton {
+            #         background-color: #2ECC71; color: white; border: none;
+            #         padding: 10px; border-radius: 18px; font-size: 13px;
+            #         font-weight: 500; margin: 5px 20px;
+            #     }
+            #     QPushButton:hover { background-color: #27AE60; }
+            #     QPushButton:pressed { background-color: #1E8449; }
+            # """)
+            # self.add_user_btn.clicked.connect(self.handle_add_user_button_click)
+            # sidebar_layout.addWidget(self.add_user_btn)
 
-            # Tombol "New Custom Conversation" untuk technician
-            self.new_custom_conv_btn = QPushButton("💬+ New Custom Conversation")
-            self.new_custom_conv_btn.setStyleSheet("""
+            # # Tombol "New Custom Conversation" untuk technician
+            # self.new_custom_conv_btn = QPushButton("💬+ New Custom Conversation")
+            # self.new_custom_conv_btn.setStyleSheet("""
+            #     QPushButton {
+            #         background-color: #3498DB; /* Warna biru sebagai contoh */
+            #         color: white; border: none;
+            #         padding: 10px; border-radius: 18px; font-size: 13px;
+            #         font-weight: 500; margin: 5px 20px;
+            #     }
+            #     QPushButton:hover { background-color: #2980B9; }
+            #     QPushButton:pressed { background-color: #1F618D; }
+            # """)
+            # self.new_custom_conv_btn.clicked.connect(self.handle_new_custom_conversation_click)
+            # sidebar_layout.addWidget(self.new_custom_conv_btn)
+            self.add_contact_btn = QPushButton("👤 Add Contact")
+            self.add_contact_btn.setStyleSheet("""
                 QPushButton {
-                    background-color: #3498DB; /* Warna biru sebagai contoh */
+                    background-color: #28A745; /* Warna hijau yang berbeda */
                     color: white; border: none;
                     padding: 10px; border-radius: 18px; font-size: 13px;
                     font-weight: 500; margin: 5px 20px;
                 }
-                QPushButton:hover { background-color: #2980B9; }
-                QPushButton:pressed { background-color: #1F618D; }
+                QPushButton:hover { background-color: #218838; }
+                QPushButton:pressed { background-color: #1E7E34; }
             """)
-            self.new_custom_conv_btn.clicked.connect(self.handle_new_custom_conversation_click)
-            sidebar_layout.addWidget(self.new_custom_conv_btn)
+            self.add_contact_btn.clicked.connect(self.handle_add_contact_click) # Handler baru
+            sidebar_layout.addWidget(self.add_contact_btn)
             
         chat_header_layout = QHBoxLayout()
         chat_header_layout.setContentsMargins(24, 15, 24, 20) 
@@ -842,7 +867,8 @@ class ChatWindow(QWidget):
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             }
         """)
-        
+    
+    
     def filter_conversations(self, text):
         search_text = text.lower().strip() # Teks pencarian, lowercase, dan hapus spasi di awal/akhir
 
@@ -896,8 +922,103 @@ class ChatWindow(QWidget):
         # Seluruh input area bisa disembunyikan/ditampilkan jika diinginkan
         # self.input_area_widget.setVisible(active) # Opsional, jika ingin menyembunyikan seluruh bar input
     
-    
-    
+    def handle_new_conversation_added(self, data):
+        new_conv_data = data.get('conversation_data')
+        if not new_conv_data:
+            print("DEBUG: ChatWindow - Menerima 'conversation_created' tanpa data percakapan.")
+            return
+
+        print(f"DEBUG: ChatWindow - Menangani percakapan baru yang ditambahkan via WebSocket: ID {new_conv_data.get('id')}")
+
+        # 1. Cek apakah percakapan ini sudah ada di list
+        exists = False
+        for i in range(self.conversation_list.count()):
+            item = self.conversation_list.item(i)
+            if item.data(Qt.UserRole) == new_conv_data['id']:
+                exists = True
+                # (Opsional) Update data item jika sudah ada (seharusnya tidak terjadi untuk event 'created')
+                # widget = self.conversation_list.itemWidget(item)
+                # if isinstance(widget, ConversationItem):
+                #     widget.conversation_data = new_conv_data
+                #     # Update UI widget jika perlu
+                break
+
+        if not exists:
+            # Tambahkan ConversationItem baru ke QListWidget
+            item = QListWidgetItem()
+            item.setData(Qt.UserRole, new_conv_data['id'])
+
+            last_preview = new_conv_data.get('last_message_preview', "No messages yet.")
+            conv_widget = ConversationItem(new_conv_data, self.user['role'], last_preview)
+            item.setSizeHint(conv_widget.sizeHint())
+
+            # Masukkan di paling atas (atau sesuai urutan last_updated jika event tidak selalu untuk item terbaru)
+            self.conversation_list.insertItem(0, item) 
+            self.conversation_list.setItemWidget(item, conv_widget)
+
+            print(f"DEBUG: ChatWindow - Percakapan baru ID {new_conv_data['id']} ditambahkan ke list.")
+
+            # (Opsional) Jika ini adalah percakapan yang melibatkan user saat ini dan ingin menandainya
+            # self.mark_conversation_unread(new_conv_data['id'], last_preview)
+
+            # (Opsional) Jika ingin langsung memilihnya
+            # if new_conv_data.get('employee_id') == self.user['id'] or new_conv_data.get('technician_id') == self.user['id']:
+            #    self.conversation_list.setCurrentItem(item)
+            #    self.select_conversation(item)
+        else:
+            print(f"DEBUG: ChatWindow - Percakapan baru ID {new_conv_data['id']} sudah ada di list, tidak ditambahkan ulang.")
+
+        # Atau cara yang lebih sederhana adalah panggil self.load_conversations()
+        # self.load_conversations()
+        # Namun, menangani event secara spesifik lebih efisien
+    def handle_add_contact_click(self):
+        dialog = AddUserDialog(self) # Menggunakan dialog yang sama
+        if dialog.exec_() == QDialog.Accepted:
+            user_data = dialog.get_data()
+
+            # Validasi dasar (sama seperti sebelumnya)
+            if not user_data['username'] or not user_data['full_name']:
+                QMessageBox.warning(self, "Input Error", "Username and Full Name cannot be empty.")
+                return
+
+            if user_data['role'] in ['technician', 'ga'] and not user_data['password']:
+                QMessageBox.warning(self, "Input Error", f"Password is required for the {user_data['role']} role.")
+                return
+
+            try:
+                # Endpoint tetap /add_user, server yang akan diubah logikanya
+                response = requests.post(f"{BASE_URL}/add_user", json=user_data)
+                response_data = response.json()
+
+                if response.status_code == 200 and response_data.get('success'):
+                    # Pesan sukses bisa lebih umum atau menyertakan info dari server
+                    message = response_data.get('message', f"User '{user_data['username']}' added successfully!")
+                    num_convs = response_data.get('conversations_created_count', 0)
+                    if num_convs > 0:
+                        message += f"\nAutomatically created {num_convs} conversation(s)."
+
+                    QMessageBox.information(self, "Success", message)
+
+                    # PENTING: Muat ulang percakapan karena user baru DAN percakapan baru mungkin telah dibuat
+                    self.load_conversations() 
+
+                elif response.status_code == 409:
+                    QMessageBox.warning(self, "Conflict", f"Failed to add user: {response_data.get('message', 'Username already exists or conflict.')}")
+                elif response.status_code == 400:
+                    QMessageBox.warning(self, "Input Error", f"Failed to add user: {response_data.get('message', 'Invalid input.')}")
+                else:
+                    QMessageBox.critical(self, "Error", f"Failed to add user: {response_data.get('message', f'Server error {response.status_code}')}")
+
+            except requests.exceptions.RequestException as e:
+                QMessageBox.critical(self, "Connection Error", f"Could not connect to server: {e}")
+            except json.JSONDecodeError:
+                QMessageBox.critical(self, "Server Error", f"Invalid response from server: {response.text}")
+            except Exception as e_generic:
+                QMessageBox.critical(self, "Error", f"An unexpected error occurred: {e_generic}")
+
+    # HAPUS ATAU KOMENTARI HANDLER LAMA INI JIKA SUDAH TIDAK DIGUNAKAN LANGSUNG
+    # def handle_add_user_button_click(self): ...
+    # def handle_new_custom_conversation_click(self): ...
     def handle_new_custom_conversation_click(self):
         dialog = CreateConversationDialog(self)
         if dialog.exec_() == QDialog.Accepted:
@@ -1639,11 +1760,35 @@ class ChatWindow(QWidget):
             print(f"DEBUG: Error koneksi saat membuat percakapan: {e}") # DEBUG
     
     def closeEvent(self, event):
-        print("DEBUG: ChatWindow - Menutup ChatWindow, menghentikan WebSocket thread.")
+        print("DEBUG: ChatWindow - closeEvent triggered. Returning to LoginWindow.")
+
+        # 1. Hentikan WebSocketThread
         if hasattr(self, 'ws_thread') and self.ws_thread.is_alive():
-            self.ws_thread.stop()  # Panggil metode stop dari WebSocketThread yang baru
+            print("DEBUG: ChatWindow - Stopping WebSocket thread...")
+            self.ws_thread.stop()  # Panggil metode stop dari WebSocketThread
             self.ws_thread.join(timeout=2) # Tunggu thread selesai (opsional, dengan timeout)
-        super().closeEvent(event)
+            if self.ws_thread.is_alive():
+                print("DEBUG: ChatWindow - WebSocket thread did not stop in time.")
+            else:
+                print("DEBUG: ChatWindow - WebSocket thread stopped.")
+        else:
+            print("DEBUG: ChatWindow - WebSocket thread not found or not alive.")
+
+        # 2. Buat dan tampilkan instance baru dari LoginWindow
+        # Kita akan membuat atribut sementara untuk LoginWindow baru agar tidak langsung di-garbage collect
+        # sebelum sempat ditampilkan, meskipun .show() biasanya cukup.
+        print("DEBUG: ChatWindow - Re-instantiating and showing LoginWindow.")
+        self._login_window_after_close = LoginWindow() # Buat instance baru
+        self._login_window_after_close.show()
+
+        # 3. Terima event close untuk ChatWindow ini agar benar-benar ditutup dan dihancurkan.
+        # Karena LoginWindow baru sudah ditampilkan, aplikasi tidak akan keluar
+        # (jika QApplication.quitOnLastWindowClosed() adalah default True).
+        print("DEBUG: ChatWindow - Accepting close event to close and destroy current ChatWindow.")
+        event.accept()
+        # super().closeEvent(event) # bisa juga digunakan sebagai alternatif event.accept()
+                                 # jika ada logika closeEvent di parent class QWidget yang ingin dijalankan.
+                                 # Untuk kasus umum, event.accept() cukup.
 
 # ... (impor lain yang sudah ada: QDialog, QVBoxLayout, QLabel, QComboBox, QPushButton, QMessageBox, requests) ...
 
@@ -1854,7 +1999,7 @@ class LoginWindow(QWidget):
         self.setup_ui()
     
     def setup_ui(self):
-        self.setWindowTitle("Login - IT Support Chat")
+        self.setWindowTitle("Login - IT Chat")
         self.setFixedSize(480, 740)
         
         # Main container
@@ -1883,7 +2028,7 @@ class LoginWindow(QWidget):
         top_layout.addWidget(logo_label)
         
         # Title
-        title = QLabel("IT Support Chat")
+        title = QLabel("IT Chat")
         title.setStyleSheet("""
             QLabel {
                 font-size: 28px; 

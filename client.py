@@ -21,7 +21,7 @@ from PyQt5.QtGui import QColor, QFont, QPainter, QBrush, QPalette, QPixmap, QIco
 # Suppress font warnings
 os.environ['QT_LOGGING_RULES'] = 'qt.qpa.fonts=false'
 
-IP = "192.168.45.171" 
+IP = "192.168.79.125" 
 # IP = "192.168.1.7" 
 PORT = "5000"
 
@@ -381,7 +381,7 @@ class ChatWindow(QWidget):
         
     
     def setup_ui(self):
-        self.setWindowTitle(f"IT Support Chat - {self.user['full_name']} ({self.user['role'].title()})")
+        self.setWindowTitle(f"IT Chat - {self.user['full_name']} ({self.user['role'].title()})")
         self.resize(600, 700)
         # self.setFixedSize(600, 900)
         
@@ -1048,11 +1048,35 @@ class ChatWindow(QWidget):
             self.load_conversations()
     
     def closeEvent(self, event):
-        print("DEBUG: ChatWindow - Menutup ChatWindow, menghentikan WebSocket thread.")
+        print("DEBUG: ChatWindow - closeEvent triggered. Returning to LoginWindow.")
+
+        # 1. Hentikan WebSocketThread
         if hasattr(self, 'ws_thread') and self.ws_thread.is_alive():
-            self.ws_thread.stop()  # Panggil metode stop dari WebSocketThread yang baru
+            print("DEBUG: ChatWindow - Stopping WebSocket thread...")
+            self.ws_thread.stop()  # Panggil metode stop dari WebSocketThread
             self.ws_thread.join(timeout=2) # Tunggu thread selesai (opsional, dengan timeout)
-        super().closeEvent(event)
+            if self.ws_thread.is_alive():
+                print("DEBUG: ChatWindow - WebSocket thread did not stop in time.")
+            else:
+                print("DEBUG: ChatWindow - WebSocket thread stopped.")
+        else:
+            print("DEBUG: ChatWindow - WebSocket thread not found or not alive.")
+
+        # 2. Buat dan tampilkan instance baru dari LoginWindow
+        # Kita akan membuat atribut sementara untuk LoginWindow baru agar tidak langsung di-garbage collect
+        # sebelum sempat ditampilkan, meskipun .show() biasanya cukup.
+        print("DEBUG: ChatWindow - Re-instantiating and showing LoginWindow.")
+        self._login_window_after_close = LoginWindow() # Buat instance baru
+        self._login_window_after_close.show()
+
+        # 3. Terima event close untuk ChatWindow ini agar benar-benar ditutup dan dihancurkan.
+        # Karena LoginWindow baru sudah ditampilkan, aplikasi tidak akan keluar
+        # (jika QApplication.quitOnLastWindowClosed() adalah default True).
+        print("DEBUG: ChatWindow - Accepting close event to close and destroy current ChatWindow.")
+        event.accept()
+        # super().closeEvent(event) # bisa juga digunakan sebagai alternatif event.accept()
+                                 # jika ada logika closeEvent di parent class QWidget yang ingin dijalankan.
+                                 # Untuk kasus umum, event.accept() cukup.
         
 class LoginWindow(QWidget):
     def __init__(self):
@@ -1060,7 +1084,7 @@ class LoginWindow(QWidget):
         self.setup_ui()
     
     def setup_ui(self):
-        self.setWindowTitle("Login - IT Support Chat")
+        self.setWindowTitle("Login - IT Chat")
         self.setFixedSize(480, 650)
         
         # Main container
@@ -1089,7 +1113,7 @@ class LoginWindow(QWidget):
         top_layout.addWidget(logo_label)
         
         # Title
-        title = QLabel("IT Support Chat")
+        title = QLabel("IT Chat")
         title.setStyleSheet("""
             QLabel {
                 font-size: 28px; 
