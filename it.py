@@ -517,6 +517,20 @@ class ChatWindow(QWidget):
         
         # Tombol "Add User" (jika hanya untuk technician/admin)
         if self.user['role'] == 'technician': # Misal hanya teknisi yang bisa tambah user
+            self.add_user_btn = QPushButton("👤 Add User")
+            # ... (style dan connect add_user_btn seperti sebelumnya) ...
+            self.add_user_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #2ECC71; color: white; border: none;
+                    padding: 10px; border-radius: 18px; font-size: 13px;
+                    font-weight: 500; margin: 5px 20px;
+                }
+                QPushButton:hover { background-color: #27AE60; }
+                QPushButton:pressed { background-color: #1E8449; }
+            """)
+            self.add_user_btn.clicked.connect(self.handle_add_user_button_click)
+            sidebar_layout.addWidget(self.add_user_btn)
+
             # Tombol "New Custom Conversation" untuk technician
             self.new_custom_conv_btn = QPushButton("💬+ New Custom Conversation")
             self.new_custom_conv_btn.setStyleSheet("""
