@@ -21,8 +21,8 @@ from PyQt5.QtGui import QColor, QFont, QPainter, QBrush, QPalette, QPixmap, QIco
 # Suppress font warnings
 os.environ['QT_LOGGING_RULES'] = 'qt.qpa.fonts=false'
 
-IP = "192.168.45.141" 
-# IP = "192.168.1.7" 
+IP = "192.168.45.140" 
+# IP = "192.168.1.8" 
 PORT = "5000"
 
 # BASE_URL = "http://localhost:5000"
@@ -136,6 +136,20 @@ class WebSocketThread(threading.Thread):
             # Logika di ChatWindow.handle_received_message seharusnya sudah kompatibel.
             self.chat_window.receive_message_signal.emit(data)
 
+        
+    # def run(self):
+    #     ws = create_connection("ws://192.168.45.137:5000")
+    #     # ws = create_connection(f"ws://{BASE_URL.split('//')[1]}")
+    #     while self.running:
+    #         try:
+    #             message = ws.recv()
+    #             data = json.loads(message)
+    #             if data.get('event') == 'new_message':
+    #                 self.chat_window.receive_message_signal.emit(data['data'])
+    #         except Exception as e:
+    #             print("WebSocket error:", e)
+    #             break
+    #     ws.close()
         
     def run(self):
         # MODIFIKASI DI SINI: Tambahkan /socket.io/ pada URL
@@ -329,7 +343,8 @@ class ConversationItem(QWidget):
         # Hover effect
         self.setStyleSheet("""
             ConversationItem {
-                background-color: transparent;
+                background-color: #4A90E2;
+                border: 20px solid #4A90E2;
                 border-radius: 8px;
             }
             ConversationItem:hover {
@@ -351,8 +366,8 @@ class ChatWindow(QWidget):
         
         # Timer untuk refresh
         self.timer = QTimer(self)
-        self.timer.timeout.connect(self.refresh_messages)
-        self.timer.start(5000)
+        # self.timer.timeout.connect(self.refresh_messages)
+        # self.timer.start(3000)
         
         # Setup WebSocket
         self.receive_message_signal.connect(self.handle_received_message)
@@ -362,8 +377,8 @@ class ChatWindow(QWidget):
     
     def setup_ui(self):
         self.setWindowTitle(f"IT Support Chat - {self.user['full_name']} ({self.user['role'].title()})")
-        # self.resize(500, 700)
-        self.setFixedSize(600, 900)
+        self.resize(600, 700)
+        # self.setFixedSize(600, 900)
         
         # Main layout
         main_layout = QHBoxLayout()
@@ -460,17 +475,18 @@ class ChatWindow(QWidget):
             QListWidget::item {
                 border: none;
                 padding: 0px;
-                margin: 0px;
-            }
+                margin: 0px; 
+            }     
             QListWidget::item:selected {
-                background-color: #EBF3FF;
-                border-left: 3px solid #4A90E2;
+                background-color: #EAF3FF; /* biru muda */
+                
+                border: 20px solid #4A90E2 transparent;
             }
         """)
         self.conversation_list.itemClicked.connect(self.select_conversation)
         sidebar_layout.addWidget(self.conversation_list)
         
-        # New chat button (for employees)
+        # New chat button (for employees                   )  
         # if self.user['role'] == 'employee':
         #     button_widget = QWidget()
         #     button_widget.setFixedHeight(80)
@@ -518,7 +534,7 @@ class ChatWindow(QWidget):
         self.chat_header_widget.setStyleSheet("""
             QWidget {
                 background-color: #3D82CA;
-                border-bottom: 1px solid #E8ECEF;
+                
             }
         """)
         
@@ -947,7 +963,8 @@ class ChatWindow(QWidget):
                     message_content.get('sender_id') == self.user['id'], 
                     message_content.get('sender_name'), 
                     message_content.get('sent_at'),
-                    message_content.get('id')
+                    message_content.get('id'),
+                    message_content.get('file_path')
                 )
         else: # Pesan untuk percakapan yang tidak aktif
             if item_found_in_sidebar:
@@ -976,8 +993,8 @@ class ChatWindow(QWidget):
         return False
     
     # Modifikasi add_message_to_ui untuk menyimpan msg_id
-    def add_message_to_ui(self, message, is_me, sender_name, sent_at, msg_id):
-        bubble = BubbleMessage(message, is_me, sender_name, sent_at)
+    def add_message_to_ui(self, message, is_me, sender_name, sent_at, msg_id, file_path=None):
+        bubble = BubbleMessage(message, is_me, sender_name, sent_at, file_path=file_path)
         bubble.msg_id = msg_id # Simpan ID pesan di bubble
 
         container = QWidget()
@@ -1124,7 +1141,7 @@ class LoginWindow(QWidget):
         form_layout.addWidget(welcome_sub)
         
         # Username input
-        username_label = QLabel("Username")
+        username_label = QLabel("NIK (nomor induk karyawan)")
         username_label.setStyleSheet("""
             QLabel {
                 font-size: 14px;
@@ -1136,7 +1153,7 @@ class LoginWindow(QWidget):
         form_layout.addWidget(username_label)
         
         self.username_input = QLineEdit()
-        self.username_input.setPlaceholderText("Enter your username")
+        self.username_input.setPlaceholderText("Enter your NIK")
         self.username_input.setStyleSheet("""
             QLineEdit {
                 padding: 16px;
@@ -1226,7 +1243,7 @@ class LoginWindow(QWidget):
         form_layout.addStretch()
         
         # Footer
-        footer_label = QLabel("Need help? Contact your system administrator")
+        footer_label = QLabel("Copyright © 2025 @iqbal.rian & @Dvim261 . All rights reserved..")
         footer_label.setStyleSheet("""
             QLabel {
                 color: #95A5A6;
