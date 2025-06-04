@@ -5,7 +5,6 @@ import json
 import threading
 import time
 import socketio
-from websocket import create_connection
 
 from PyQt5.QtMultimedia import QSoundEffect
 from PyQt5.QtWidgets import QFileDialog
@@ -13,7 +12,7 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QListWidget, QTextEdit,
     QScrollArea, QFrame, QSizePolicy, QListWidgetItem, QGraphicsDropShadowEffect,
-    QFileDialog, QMessageBox, QComboBox, QDialog, QSpacerItem, QSizePolicy
+    QFileDialog, QMessageBox, QComboBox, QDialog, QSpacerItem, QSizePolicy, QToolButton, QMenu, QStyle
 )
 from PyQt5.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply # Untuk memuat gambar secara asinkron
 from PyQt5.QtCore import pyqtSignal, Qt, QTimer, QUrl, QMimeData, QDir, QStandardPaths
@@ -28,9 +27,7 @@ IP = "192.168.45.171"
 PORT = "5000"
 
 # BASE_URL = "http://localhost:5000"
-# BASE_URL = "http://192.168.46.6:5000"  # Ganti <IP_KANTOR> dengan IP server
-# BASE_URL = "http://192.168.45.137:5000"  # Ganti <IP_KANTOR> dengan IP server
-BASE_URL = f"http://{IP}:{PORT}"   
+BASE_URL = f"http://{IP}:{PORT}"  # Ganti <IP_KANTOR> dengan IP server
 
 def is_image_file(filename_or_path):
     if not filename_or_path:
@@ -146,21 +143,6 @@ class WebSocketThread(threading.Thread):
             # Logika di ChatWindow.handle_received_message seharusnya sudah kompatibel.
             self.chat_window.receive_message_signal.emit(data)
 
-        
-    # def run(self):
-    #     ws = create_connection("ws://192.168.45.137:5000")
-    #     # ws = create_connection(f"ws://{BASE_URL.split('//')[1]}")
-    #     while self.running:
-    #         try:
-    #             message = ws.recv()
-    #             data = json.loads(message)
-    #             if data.get('event') == 'new_message':
-    #                 self.chat_window.receive_message_signal.emit(data['data'])
-    #         except Exception as e:
-    #             print("WebSocket error:", e)
-    #             break
-    #     ws.close()
-        
     def run(self):
         # MODIFIKASI DI SINI: Tambahkan /socket.io/ pada URL
         print(f"DEBUG: WebSocketThread (python-socketio) - Mencoba terhubung ke http://{IP}:{PORT}")
@@ -193,60 +175,6 @@ class WebSocketThread(threading.Thread):
         else:
             print("DEBUG: WebSocketThread (python-socketio) - Klien Socket.IO tidak terhubung atau sudah terputus.")
 
-# class BubbleMessage(QLabel):
-#     def __init__(self, text, is_me, sender_name, time, file_path=None, parent=None):
-#         super().__init__(parent)
-#         self.is_me = is_me
-#         self.sender_name = sender_name
-#         self.time = time
-#         self.file_path = file_path
-#         self.msg_id = None # Tambahkan untuk menyimpan ID pesan
-        
-#         self.setWordWrap(True)
-#         self.setMargin(15)
-#         self.setTextFormat(Qt.RichText)
-        
-#         display_text = text
-#         # Jika Anda ingin menampilkan ikon atau nama file yang lebih bersih dari path:
-#         # if self.file_path:
-#         #     display_text = f"📄 File: {os.path.basename(self.file_path)}" 
-#         # Namun, karena server sudah mengirimkan format "[File: namafile.ext]", kita bisa langsung gunakan 'text'.
-
-#         if is_me:
-#             message_html = f"""
-#             <div style='font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 15px; line-height: 1;'>
-#                 <div style='color: #FFFFFF; margin-bottom: 8px;'>{display_text}</div>
-#                 <div style='color: rgba(255,255,255,0.8); font-size: 11px; text-align: right; margin-top: 4px;'>{time}</div>
-#             </div>"""
-#             self.setStyleSheet("""
-#                 BubbleMessage {
-#                     background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4A90E2, stop:1 #357ABD);
-#                     border-radius: 18px;
-#                     margin: 4px 4px 4px 60px; /* Margin untuk pesan 'saya' di it.py */
-#                     max-width: 400px;
-#                 }""")
-#         else: # Pesan dari orang lain
-#             message_html = f"""
-#             <div style='font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 15px; line-height: 1;'>
-#                 <div style='color: #2C3E50; margin-bottom: 8px;'>{display_text}</div>
-#                 <div style='color: #95A5A6; font-size: 11px; text-align: left; margin-top: 4px;'>{time}</div>
-#             </div>"""
-#             self.setStyleSheet("""
-#                 BubbleMessage {
-#                     background-color: #FFFFFF; border: 1px solid #E8ECEF; border-radius: 18px;
-#                     margin: 4px 60px 4px 4px; /* Margin untuk pesan 'orang lain' di it.py */
-#                     max-width: 400px;
-#                 }""")
-
-#         self.setText(message_html)
-#         # Perataan (alignment) di it.py biasanya diatur oleh kontainer yang menambahkan addStretch.
-#         # self.setAlignment(Qt.AlignLeft if not is_me else Qt.AlignRight) # Mungkin tidak diperlukan jika kontainer sudah mengatur
-#         self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
-
-#         shadow = QGraphicsDropShadowEffect()
-#         shadow.setBlurRadius(8); shadow.setColor(QColor(0, 0, 0, 20)); shadow.setOffset(0, 2)
-#         self.setGraphicsEffect(shadow)
-        
 class BubbleMessage(QLabel):
     def __init__(self, text, is_me, sender_name, time, file_path=None, parent=None):
         super().__init__(parent)
@@ -268,53 +196,61 @@ class BubbleMessage(QLabel):
         
         # display_text = text
 
+        # Tambahkan sedikit style jika ini adalah file untuk membuatnya terlihat seperti link
         if self.filename_to_download and text.startswith("[File:"):
+            # Ambil nama file dari teks seperti "[File: namafile.PNG]"
             actual_filename_in_text = text[len("[File: "):-1]
             display_text = f"<a href='#' style='color: inherit; text-decoration: underline;'>📄 File: {actual_filename_in_text}</a>"
-
+        
+        # Create message bubble styling similar to the image
         if is_me:
             message_html = f"""
-            <div style='font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 15px; line-height: 1;'>
-                <div style='color: #FFFFFF; margin-bottom: 8px;'>{display_text}</div>
+            <div style='font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 12px; line-height: 1; white-space: normal; word-wrap: break-word; max-width: 100%;'>
+                <div style='color: #FFFFFF; margin-bottom: 10px; '>{display_text}</div>
                 <div style='color: rgba(255,255,255,0.8); font-size: 11px; text-align: right; margin-top: 4px;'>{time}</div>
             </div>"""
             self.setStyleSheet("""
                 BubbleMessage {
                     background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4A90E2, stop:1 #357ABD);
                     border-radius: 18px;
-                    margin: 4px 4px 4px 60px; 
+                    margin: 4px 4px 4px 4px;
                     max-width: 400px;
                 }""")
-        else: 
+        else:
             message_html = f"""
-            <div style='font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 15px; line-height: 1;'>
-                <div style='color: #2C3E50; margin-bottom: 8px;'>{display_text}</div>
+            <div style='font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 12px; line-height: 1; white-space: normal; word-wrap: break-word; max-width: 100%;'>
+                <div style='color: #2C3E50; margin-bottom: 10px; '>{display_text}</div>
                 <div style='color: #95A5A6; font-size: 11px; text-align: left; margin-top: 4px;'>{time}</div>
             </div>"""
             self.setStyleSheet("""
                 BubbleMessage {
                     background-color: #FFFFFF; border: 1px solid #E8ECEF; border-radius: 18px;
-                    margin: 4px 60px 4px 4px; 
+                    margin: 4px 4px 4px 4px;
                     max-width: 400px;
                 }""")
 
         self.setText(message_html)
+        self.setWordWrap(True)
+        self.setMaximumWidth(400)
+        self.setAlignment(Qt.AlignLeft if not is_me else Qt.AlignRight)
         self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
 
         shadow = QGraphicsDropShadowEffect()
         shadow.setBlurRadius(8); shadow.setColor(QColor(0, 0, 0, 20)); shadow.setOffset(0, 2)
         self.setGraphicsEffect(shadow)
-
+        
+        # Jika ada file, aktifkan link opening
         if self.filename_to_download:
-            self.setOpenExternalLinks(False) 
+            self.setOpenExternalLinks(False) # Kita handle kliknya manual
             # self.linkActivated.connect(self.handle_link_click) # Tidak perlu jika mousePressEvent cukup
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton and self.filename_to_download:
+            # Pastikan BASE_URL di client.py dan it.py sudah benar
             download_url_str = f"{BASE_URL}/uploads/{self.filename_to_download}"
             print(f"Attempting to open URL for download: {download_url_str}")
             QDesktopServices.openUrl(QUrl(download_url_str))
-            event.accept()
+            event.accept() # Tandai event sudah dihandle
         else:
             super().mousePressEvent(event)
 
@@ -327,6 +263,7 @@ class BubbleMessage(QLabel):
         if self.filename_to_download:
             self.unsetCursor()
         super().leaveEvent(event)
+
  
 class ConversationItem(QWidget):
     # Versi ini menggunakan 'last_message' yang di-pass saat inisialisasi
@@ -419,6 +356,8 @@ class ChatWindow(QWidget):
         self.unread_map = {} 
         self.message_cache = {}
         self.setup_ui()
+        if not self.current_conversation:
+            self.chat_options_button.hide()
         self.load_conversations() # Panggil setelah setup_ui
         
             # --- INISIALISASI SUARA NOTIFIKASI ---
@@ -460,7 +399,7 @@ class ChatWindow(QWidget):
         self.ws_thread.start()
         
 
-
+        
     def setup_ui(self):
         self.setWindowTitle(f"IT Support Chat - {self.user['full_name']} ({self.user['role'].title()})")
         self.resize(1200, 800)
@@ -529,9 +468,9 @@ class ChatWindow(QWidget):
         search_layout = QHBoxLayout()
         search_layout.setContentsMargins(20, 10, 20, 10)
         
-        search_input = QLineEdit()
-        search_input.setPlaceholderText("🔍 Search messages...")
-        search_input.setStyleSheet("""
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("🔍 Search messages...")
+        self.search_input.setStyleSheet("""
             QLineEdit {
                 background-color: #F1F3F4;
                 border: none;
@@ -545,7 +484,11 @@ class ChatWindow(QWidget):
                 border: 2px solid #4A90E2;
             }
         """)
-        search_layout.addWidget(search_input)
+        # Hubungkan sinyal textChanged ke metode filter_conversations
+        self.search_input.textChanged.connect(self.filter_conversations)
+
+        
+        search_layout.addWidget(self.search_input)
         search_widget.setLayout(search_layout)
         sidebar_layout.addWidget(search_widget)
         
@@ -572,82 +515,8 @@ class ChatWindow(QWidget):
         self.conversation_list.itemClicked.connect(self.select_conversation)
         sidebar_layout.addWidget(self.conversation_list)
         
-        # New chat button (for employees)
-        # if self.user['role'] == 'technician': 
-        #     button_widget = QWidget()
-        #     button_widget.setFixedHeight(80)
-        #     button_widget.setStyleSheet("background-color: #FFFFFF; border-top: 1px solid #E8ECEF;")
-            
-        #     button_layout = QHBoxLayout()
-        #     button_layout.setContentsMargins(20, 20, 20, 20)
-            
-        #     self.new_chat_btn = QPushButton("✨ New Ticket")
-        #     self.new_chat_btn.setStyleSheet("""
-        #         QPushButton {
-        #             background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
-        #                 stop:0 #4A90E2, stop:1 #357ABD);
-        #             color: white;
-        #             border: none;
-        #             padding: 12px 24px;
-        #             border-radius: 20px;
-        #             font-size: 14px;
-        #             font-weight: 600;
-        #         }
-        #         QPushButton:hover {
-        #             background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
-        #                 stop:0 #357ABD, stop:1 #2E6DA4);
-        #         }
-        #         QPushButton:pressed {
-        #             background: #2E6DA4;
-        #         }
-        #     """)
-        #     self.new_chat_btn.clicked.connect(self.create_new_conversation)
-        #     button_layout.addWidget(self.new_chat_btn)
-        #     button_widget.setLayout(button_layout)
-        #     sidebar_layout.addWidget(button_widget)
-        
-        # Dalam ChatWindow.setup_ui, di bagian sidebar_layout:
-# ... (setelah self.new_chat_btn atau di tempat lain yang sesuai di sidebar) ...
-        # button_layout = QHBoxLayout()
-        # button_layout.setContentsMargins(20, 20, 20, 20)
-        # self.add_user_btn = QPushButton("👤 Add User") # Atau "➕ New Contact"
-        # self.add_user_btn.setStyleSheet("""
-        #     QPushButton {
-        #         background-color: #2ECC71; /* Warna hijau sebagai contoh */
-        #         color: white;
-        #         border: none;
-        #         padding: 10px; /* Sesuaikan padding */
-        #         border-radius: 18px; /* Sesuaikan border-radius */
-        #         font-size: 13px; /* Sesuaikan font size */
-        #         font-weight: 500;
-        #         margin: 5px 50px; /* Margin atas/bawah dan kiri/kanan */
-        #     }
-        #     QPushButton:hover {
-        #         background-color: #27AE60;
-        #     }
-        #     QPushButton:pressed {
-        #         background-color: #1E8449;
-        #     }
-        # """)
-        # self.add_user_btn.clicked.connect(self.handle_add_user_button_click) # Hubungkan ke handler
-        # sidebar_layout.addWidget(self.add_user_btn) # Tambahkan ke layout sidebar
-        
         # Tombol "Add User" (jika hanya untuk technician/admin)
         if self.user['role'] == 'technician': # Misal hanya teknisi yang bisa tambah user
-            self.add_user_btn = QPushButton("👤 Add User")
-            # ... (style dan connect add_user_btn seperti sebelumnya) ...
-            self.add_user_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #2ECC71; color: white; border: none;
-                    padding: 10px; border-radius: 18px; font-size: 13px;
-                    font-weight: 500; margin: 5px 20px;
-                }
-                QPushButton:hover { background-color: #27AE60; }
-                QPushButton:pressed { background-color: #1E8449; }
-            """)
-            self.add_user_btn.clicked.connect(self.handle_add_user_button_click)
-            sidebar_layout.addWidget(self.add_user_btn)
-
             # Tombol "New Custom Conversation" untuk technician
             self.new_custom_conv_btn = QPushButton("💬+ New Custom Conversation")
             self.new_custom_conv_btn.setStyleSheet("""
@@ -753,6 +622,82 @@ class ChatWindow(QWidget):
         
         chat_header_layout.addLayout(info_layout)
         chat_header_layout.addStretch()
+        
+        
+        # --- TOMBOL MENU TITIK TIGA BARU ---
+        self.chat_options_button = QToolButton(self.chat_header_widget) # Beri parent
+        self.chat_options_button.setText("⋮") # Karakter tiga titik vertikal Unicode
+        # Atau gunakan ikon jika punya: self.chat_options_button.setIcon(QIcon("path/to/your/icon.png"))
+        self.chat_options_button.setFixedSize(40, 40) # Sesuaikan ukuran jika perlu
+        self.chat_options_button.setStyleSheet("""
+            QToolButton { 
+                font-size: 40px; /* Sesuaikan ukuran font untuk karakter titik tiga */
+                color: white; 
+                border: none; 
+                padding: 0px; /* Hapus padding default jika ada */
+                text-align: center; /* Pusatkan teks */
+                align: center; /* Pusatkan teks */
+                background-color: transparent; /* Transparan agar menyatu dengan header */
+            }
+            QToolButton::menu-indicator { 
+                image: none; /* Sembunyikan panah dropdown default */
+            } 
+            QToolButton:hover { 
+                background-color: rgba(255, 255, 255, 0.2); /* Efek hover halus */
+                border-radius: 4px; 
+            }
+            QToolButton:pressed {
+                background-color: rgba(255, 255, 255, 0.3);
+            }
+        """)
+        self.chat_options_button.setPopupMode(QToolButton.InstantPopup) # Menu langsung muncul saat diklik
+        self.chat_options_button.setFocusPolicy(Qt.NoFocus)
+        self.chat_options_button.setToolTip("Opsi")
+
+        # Buat QMenu
+        chat_menu = QMenu(self) # Beri parent self (ChatWindow)
+        
+        # Tambahkan Aksi-Aksi ke Menu
+        self.action_edit_user = chat_menu.addAction("Edit") # Akan relevan jika user lain adalah employee
+        self.action_delete_user = chat_menu.addAction("Delete User")   # Akan relevan jika user lain adalah employee
+        
+        chat_menu.setStyleSheet("""
+            QMenu {
+                border: 1px solid #D0D0D0; /* Optional: Tambahkan border jika mau */
+                border-radius: 5px; /* Optional: Sudut melengkung */
+                background-color: white; /* Warna latar belakang menu */
+            }
+            QMenu::item {
+                font-size: 10pt; /* Atur ukuran font di sini, misal 10pt, 11pt, 13px, dll. */
+                padding: 8px 25px 8px 25px; /* Atas Kanan Bawah Kiri - Sesuaikan padding jika perlu */
+                color: #333333; /* Warna teks item menu */
+                background-color: transparent; /* Latar belakang item transparan */
+            }
+            QMenu::item:selected { /* Style saat item disorot atau dipilih */
+                background-color: #EBF3FF; /* Warna latar belakang saat dipilih (biru muda) */
+                color: #2C3E50; /* Warna teks saat dipilih */
+            }
+            QMenu::separator { /* Style untuk separator jika ada */
+                height: 1px;
+                background: #D0D0D0;
+                margin-left: 10px;
+                margin-right: 10px;
+            }
+        """)
+        
+        self.chat_options_button.setMenu(chat_menu)
+        
+        # Sembunyikan tombol ini secara default, akan ditampilkan saat percakapan dipilih
+        self.chat_options_button.hide() 
+
+        # Hubungkan sinyal triggered dari setiap aksi ke metode placeholder
+        # Kita akan buat metode ini nanti
+        self.action_edit_user.triggered.connect(self.handle_edit_user_action)
+        self.action_delete_user.triggered.connect(self.handle_delete_user_action_from_menu)
+
+        chat_header_layout.addWidget(self.chat_options_button) # Tambahkan tombol ke header
+        # --- AKHIR BAGIAN TOMBOL MENU ---
+
         
         self.chat_header_widget.setLayout(chat_header_layout)
         chat_area.addWidget(self.chat_header_widget)
@@ -883,10 +828,38 @@ class ChatWindow(QWidget):
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             }
         """)
-    # Dalam kelas ChatWindow:
-# ...
-    # Dalam kelas ChatWindow:
-# ...
+        
+    def filter_conversations(self, text):
+        search_text = text.lower().strip() # Teks pencarian, lowercase, dan hapus spasi di awal/akhir
+
+        for i in range(self.conversation_list.count()):
+            item = self.conversation_list.item(i) # QListWidgetItem
+            widget = self.conversation_list.itemWidget(item) # ConversationItem widget
+
+            if widget and hasattr(widget, 'conversation_data'):
+                conv_data = widget.conversation_data
+                
+                # Tentukan nama yang akan dicari berdasarkan peran pengguna yang login
+                name_to_check = ""
+                if self.user['role'] == 'technician': # Teknisi mencari nama employee
+                    name_to_check = conv_data.get('employee_name', '').lower()
+                elif self.user['role'] == 'employee': # Employee mencari nama teknisi
+                    name_to_check = conv_data.get('tech_name', '').lower()
+                
+                # Jika teks pencarian kosong, tampilkan semua item
+                if not search_text:
+                    item.setHidden(False)
+                else:
+                    # Sembunyikan item jika nama tidak mengandung teks pencarian
+                    if search_text in name_to_check:
+                        item.setHidden(False)
+                    else:
+                        item.setHidden(True)
+            else:
+                # Jika tidak ada widget atau conversation_data, defaultnya tampilkan saja
+                # atau sembunyikan jika ada teks pencarian (tergantung preferensi)
+                item.setHidden(bool(search_text)) 
+
     def update_chat_input_active_state(self, active: bool):
         """Mengatur status aktif/nonaktif untuk area input pesan."""
         self.message_input.setEnabled(active)
@@ -952,38 +925,6 @@ class ChatWindow(QWidget):
             except Exception as e_generic:
                 QMessageBox.critical(self, "Error", f"An unexpected error occurred: {e_generic}")
 
-# Tambahkan juga handler untuk event socket 'conversation_created' jika Anda emit dari server
-# Di dalam __init__ atau setup_event_handlers di WebSocketThread:
-# @self.sio.on('conversation_created')
-# def on_conversation_created(data):
-#     print(f"DEBUG: WebSocketThread - Menerima 'conversation_created': {data}")
-#     self.chat_window.new_conversation_signal.emit(data.get('conversation_data'))
-
-# Di ChatWindow, definisikan sinyal dan slotnya:
-# new_conversation_signal = pyqtSignal(dict) # Di atas __init__
-# self.new_conversation_signal.connect(self.handle_newly_created_conversation) # Di __init__
-
-# def handle_newly_created_conversation(self, conv_data):
-#     print(f"DEBUG: ChatWindow - Menangani percakapan baru dari socket: {conv_data}")
-#     # Logika untuk menambahkan atau memperbarui item percakapan di self.conversation_list
-#     # Ini bisa lebih kompleks karena harus membuat QListWidgetItem dan ConversationItem baru
-#     # Untuk cara paling mudah, panggil saja load_conversations()
-#     self.load_conversations()
-#     QMessageBox.information(self, "New Conversation", f"A new conversation involving {conv_data.get('employee_name')} and {conv_data.get('tech_name')} has been noted.")
-
-
-# (Opsional) Helper untuk memilih percakapan berdasarkan ID setelah dibuat
-# def select_conversation_by_id(self, conversation_id):
-#     for i in range(self.conversation_list.count()):
-#         item = self.conversation_list.item(i)
-#         if item.data(Qt.UserRole) == conversation_id:
-#             self.conversation_list.setCurrentItem(item)
-#             self.select_conversation(item) # Panggil slot yang sudah ada
-#             break
-
-# ... (sisa metode ChatWindow)
-    
-    
     def handle_add_user_button_click(self):
         dialog = AddUserDialog(self)
         if dialog.exec_() == QDialog.Accepted:
@@ -1023,7 +964,117 @@ class ChatWindow(QWidget):
             except Exception as e_generic:
                 QMessageBox.critical(self, "Error", f"An unexpected error occurred: {e_generic}")
 
-# ... (sisa metode ChatWindow) ...    
+    def handle_edit_user_action(self):
+        if not self.current_conversation:
+            QMessageBox.information(self, "Info", "Tidak ada percakapan yang dipilih untuk mengidentifikasi user.")
+            return
+        # Dapatkan employee_id dari percakapan saat ini untuk diedit
+        # (Asumsi teknisi mengedit employee)
+        conv_data = self._get_current_selected_conversation_data()
+        if not conv_data or self.user['role'] != 'technician':
+            QMessageBox.warning(self, "Error", "Tidak bisa mengidentifikasi user Employee dari percakapan ini, atau Anda bukan Teknisi.")
+            return
+            
+        employee_id_to_edit = conv_data.get('employee_id')
+        employee_name = conv_data.get('employee_name')
+        print(f"DEBUG: Aksi Edit User untuk Employee ID: {employee_id_to_edit} ({employee_name})")
+        QMessageBox.information(self, "Info", f"Fitur edit user {employee_name} (ID: {employee_id_to_edit}) belum diimplementasikan.")
+
+
+    def handle_delete_user_action_from_menu(self):
+        print("DEBUG: ChatWindow - Aksi 'Hapus User Ini' dari menu dipicu.")
+        if not self.current_conversation:
+            QMessageBox.information(self, "Info", "Tidak ada percakapan yang dipilih untuk mengidentifikasi user.")
+            return
+
+        if self.user['role'] != 'technician':
+            QMessageBox.warning(self, "Akses Ditolak", "Fitur ini hanya untuk teknisi.")
+            return
+
+        conv_data = self._get_current_selected_conversation_data() # Gunakan helper yang sudah ada
+        if not conv_data:
+            QMessageBox.warning(self, "Error", "Tidak bisa mendapatkan data percakapan saat ini.")
+            return
+            
+        # Asumsi teknisi menghapus employee dari percakapan yang dipilih
+        user_id_to_delete = conv_data.get('employee_id')
+        user_name_to_delete = conv_data.get('employee_name', 'Klien') # Ambil nama untuk pesan konfirmasi
+
+        if not user_id_to_delete:
+            QMessageBox.warning(self, "Error", "Tidak dapat menemukan ID Employee dari percakapan ini untuk dihapus.")
+            return
+
+        reply = QMessageBox.warning(self, 
+                                    f"Konfirmasi Hapus User: {user_name_to_delete}",
+                                    f"Apakah Anda yakin ingin menghapus user '{user_name_to_delete}' (ID: {user_id_to_delete}) secara permanen?\n\n"
+                                    f"PERHATIAN:\n"
+                                    f"- SEMUA percakapan yang melibatkan user ini akan dihapus.\n"
+                                    f"- SEMUA pesan di dalam percakapan tersebut juga akan dihapus.\n"
+                                    f"- Tindakan ini TIDAK DAPAT DIURUNGKAN!",
+                                    QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
+        
+        if reply == QMessageBox.Yes:
+            print(f"DEBUG: ChatWindow - Pengguna mengkonfirmasi penghapusan user ID: {user_id_to_delete} ({user_name_to_delete})")
+            try:
+                # Kirim permintaan DELETE ke server
+                # Kita akan membuat endpoint ini di server.py nanti
+                response = requests.delete(f"{BASE_URL}/delete_user/{user_id_to_delete}")
+                
+                if response.status_code == 200:
+                    response_data = response.json()
+                    if response_data.get('success'):
+                        QMessageBox.information(self, "Sukses", 
+                                                f"User '{user_name_to_delete}' (ID: {user_id_to_delete}) dan semua data terkait berhasil dihapus.")
+                        # Reset tampilan chat area jika percakapan saat ini melibatkan user yang dihapus
+                        if self.current_conversation and conv_data.get('id') == self.current_conversation: # Cek apakah percakapan saat ini yang terkait
+                            self.current_conversation = None
+                            self.chat_name.setText("Select a conversation")
+                            self.chat_status.setText("Choose a chat to start messaging")
+                            self.chat_avatar.setText("?")
+                            while self.messages_layout.count() > 1:
+                                item_to_remove = self.messages_layout.takeAt(0)
+                                widget = item_to_remove.widget()
+                                if widget:
+                                    widget.deleteLater()
+                            self.chat_options_button.hide()
+                        
+                        # Hapus dari cache jika ada (meskipun load_conversations akan menimpanya)
+                        # Ini lebih kompleks karena user_id_to_delete bisa ada di banyak conversation_id di cache
+                        # Untuk penyederhanaan, kita akan mengandalkan load_conversations
+                        
+                        self.load_conversations() # Muat ulang daftar percakapan di sidebar
+                    else:
+                        QMessageBox.critical(self, "Gagal", 
+                                             f"Gagal menghapus user: {response_data.get('message', 'Kesalahan tidak diketahui dari server.')}")
+                elif response.status_code == 404: # User not found
+                     QMessageBox.warning(self, "Gagal", f"User ID {user_id_to_delete} tidak ditemukan di server.")
+                else:
+                    error_message = f"Gagal menghubungi server untuk menghapus user. Status: {response.status_code}"
+                    try:
+                        error_details = response.json().get('message', response.text)
+                        error_message += f" - {error_details}"
+                    except: # Jika respons bukan JSON
+                        error_message += f" - {response.text}"
+                    QMessageBox.critical(self, "Error Server", error_message)
+            except requests.exceptions.RequestException as e:
+                QMessageBox.critical(self, "Error Koneksi", f"Tidak bisa terhubung ke server: {e}")
+            except Exception as e_general:
+                QMessageBox.critical(self, "Error", f"Terjadi kesalahan tak terduga: {e_general}")
+        else:
+            print(f"DEBUG: ChatWindow - Pengguna membatalkan penghapusan user ID: {user_id_to_delete}")
+
+    # Metode helper _get_current_selected_conversation_data() (jika belum ada atau berbeda)
+    # Pastikan metode ini ada dan berfungsi untuk mengambil conv_data dari item yang dipilih.
+    def _get_current_selected_conversation_data(self):
+        if self.current_conversation:
+            for i in range(self.conversation_list.count()):
+                item = self.conversation_list.item(i)
+                if item.data(Qt.UserRole) == self.current_conversation: # current_conversation adalah ID
+                    widget = self.conversation_list.itemWidget(item)
+                    if widget and hasattr(widget, 'conversation_data'):
+                        return widget.conversation_data
+        return None
+
 
     # Tambahkan metode ini dari it.py ke kelas ChatWindow di client.py
     def attach_file(self):
@@ -1062,8 +1113,8 @@ class ChatWindow(QWidget):
                 else:
                     print(f"Gagal mengirim file: {response.status_code} - {response.text}")
         except Exception as e:
-            print(f"Terjadi kesalahan saat mengirim file: {e}")    
-            
+            print(f"Terjadi kesalahan saat mengirim file: {e}")     
+    
     def mark_conversation_unread(self, conversation_id, new_message_text=None):
         print(f"DEBUG: Menandai belum dibaca untuk conv ID: {conversation_id}") # DEBUG
         self.unread_map[conversation_id] = True 
@@ -1071,6 +1122,7 @@ class ChatWindow(QWidget):
             item = self.conversation_list.item(i)
             if item.data(Qt.UserRole) == conversation_id:
                 widget = self.conversation_list.itemWidget(item)
+                
                 if widget and hasattr(widget, 'preview_label'):
                     display_text = "🔵 New message"
                     if new_message_text:
@@ -1140,6 +1192,19 @@ class ChatWindow(QWidget):
                     
                     print(f"DEBUG: ChatWindow - Unread message: \n {self.unread_map}") # DEBUG
                 # print(f"DEBUG: ChatWindow - percakapan dimuat. List:\n {conversations}") # DEBUG
+                
+                if self.current_conversation:
+                    self.chat_options_button.show() # Tampilkan tombol jika ada percakapan dipilih
+                    # Anda mungkin ingin mengaktifkan/menonaktifkan aksi tertentu berdasarkan peran user atau status percakapan
+                    employee_id_in_conv = conv_data.get('employee_id')
+                    # Hanya aktifkan hapus/edit user jika ada employee_id dan user saat ini adalah teknisi
+                    can_manage_employee = bool(self.user['role'] == 'technician' and employee_id_in_conv)
+                    self.action_edit_user.setEnabled(can_manage_employee)
+                    self.action_delete_user.setEnabled(can_manage_employee)
+                    self.action_delete_conversation.setEnabled(True) # Selalu bisa hapus conversation aktif
+                else:
+                    self.chat_options_button.hide() # Sembunyikan jika tidak ada percakapan
+
             else:
                 print(f"DEBUG: ChatWindow - Gagal memuat percakapan: {response.status_code} - {response.text}") # DEBUG
         except requests.exceptions.RequestException as e:
@@ -1148,9 +1213,21 @@ class ChatWindow(QWidget):
             print(f"DEBUG: Error tak terduga di load_conversations: {e}")
 
     
-    def select_conversation(self, item ):
+    def select_conversation(self, item):
         if not item:
-            print("DEBUG: ChatWindow - select_conversation dipanggil dengan item None") # DEBUG
+            print("DEBUG: ChatWindow - select_conversation dipanggil dengan item None")
+            self.chat_options_button.hide() # Sembunyikan jika item tidak valid
+            # Reset header ke default jika tidak ada percakapan dipilih
+            self.chat_name.setText("Select a conversation")
+            self.chat_status.setText("Choose a chat to start messaging")
+            self.chat_avatar.setText("?") # Atau kosongkan
+            # Clear messages area
+            while self.messages_layout.count() > 1:
+                item_to_remove = self.messages_layout.takeAt(0)
+                widget = item_to_remove.widget()
+                if widget:
+                    widget.deleteLater()
+            self.current_conversation = None
             return
         self.update_chat_input_active_state(True)
         self.back_button.setVisible(True)
@@ -1162,7 +1239,15 @@ class ChatWindow(QWidget):
         if not conv_widget:
             print(f"DEBUG: ChatWindow - Tidak ada widget untuk item percakapan ID: {conversation_id}") # DEBUG
             return
+
+        # Tampilkan tombol menu karena percakapan dipilih
+        self.chat_options_button.show() 
+        
         conv_data = conv_widget.conversation_data
+
+        # Aktifkan/Nonaktifkan aksi menu berdasarkan konteks
+        self.action_edit_user.setEnabled(True)
+        self.action_delete_user.setEnabled(True)
         
         if self.user['role'] == 'employee': #
             name = conv_data.get('tech_name', 'Technician') #
@@ -1179,9 +1264,6 @@ class ChatWindow(QWidget):
         # Reset style dasar ConversationItem
         default_item_style = ConversationItem(conv_data, self.user['role'], "").styleSheet() # Dapatkan style dasar
         conv_widget.setStyleSheet(default_item_style)
-        
-    
-
         
         # Reset tampilan preview_label ke pesan terakhir yang sebenarnya
         if hasattr(conv_widget, 'preview_label'):
@@ -1230,7 +1312,6 @@ class ChatWindow(QWidget):
             self.conversation_list.setCurrentItem(None) # Ini penting untuk menghapus fokus    
             
     def load_messages(self, conversation_id, scroll_to_bottom=False):
-        
         print(f"DEBUG: ChatWindow - Memuat pesan untuk conv_id: {conversation_id}") # DEBUG
         try:
             response = requests.get(f"{BASE_URL}/get_messages/{conversation_id}", timeout=5)
@@ -1263,8 +1344,8 @@ class ChatWindow(QWidget):
                             msg_data['id'], # msg_id penting untuk message_exists
                             msg_data['file_path'] # DIPERBARUI: Teruskan file_path
                         )
-                        
-                
+                # if scroll_to_bottom:
+                #     QTimer.singleShot(100, self.scroll_to_bottom)
                 return self.message_cache.get(conversation_id, []) 
             else:
                 print(f"DEBUG: ChatWindow - Gagal memuat pesan: {response.status_code} - {response.text}") # DEBUG
@@ -1484,31 +1565,9 @@ class ChatWindow(QWidget):
                             return True
         return False
     
-
-    
-    # def add_message_to_ui(self, message, is_me, sender_name, sent_at, scroll_to_bottom=True):
-    #     bubble = BubbleMessage(message, is_me, sender_name, sent_at)
-        
-    #     # Create container for proper alignment
-    #     container = QWidget()
-    #     container_layout = QHBoxLayout()
-    #     container_layout.setContentsMargins(0, 0, 0, 0)
-        
-    #     if is_me:
-    #         container_layout.addStretch()
-    #         container_layout.addWidget(bubble)
-    #     else:
-    #         container_layout.addWidget(bubble)
-    #         container_layout.addStretch()
-        
-    #     container.setLayout(container_layout)
-    #     self.messages_layout.addWidget(container)
-    #     if scroll_to_bottom:
-    #         QTimer.singleShot(100, self.scroll_to_bottom)
-    
-    # Modifikasi add_message_to_ui untuk menerima seluruh dictionary pesan
-    def add_message_to_ui(self, message_text, is_me, sender_name, sent_at, msg_id=None, file_path=None, scroll_to_bottom=True ):
-        bubble = BubbleMessage(message_text, is_me, sender_name, sent_at, file_path=file_path) # Tambahkan file_path jika ada
+    # Modifikasi add_message_to_ui untuk menyimpan msg_id
+    def add_message_to_ui(self, message_text, is_me, sender_name, sent_at, msg_id=None, file_path=None):
+        bubble = BubbleMessage(message_text, is_me, sender_name, sent_at, file_path)
         bubble.msg_id = msg_id # Simpan ID pesan di bubble
         
         container = QWidget()
@@ -1524,10 +1583,7 @@ class ChatWindow(QWidget):
         
         # Sisipkan sebelum stretch item terakhir di self.messages_layout
         self.messages_layout.insertWidget(self.messages_layout.count() - 1, container)
-        if scroll_to_bottom:
-            QTimer.singleShot(100, self.scroll_to_bottom)
-            
-
+        QTimer.singleShot(100, self.scroll_to_bottom)
     
     def send_message(self):
         if not self.current_conversation or not self.message_input.toPlainText().strip():

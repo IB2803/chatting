@@ -5,7 +5,6 @@ import json
 import threading
 import time
 import socketio
-from websocket import create_connection
 
 from PyQt5.QtWidgets import QFileDialog
 from PyQt5.QtWidgets import (
@@ -207,7 +206,8 @@ class BubbleMessage(QLabel):
             # Ambil nama file dari teks seperti "[File: namafile.PNG]"
             actual_filename_in_text = text[len("[File: "):-1]
             display_text = f"<a href='#' style='color: inherit; text-decoration: underline;'>📄 File: {actual_filename_in_text}</a>"
-
+        
+        # Create message bubble styling similar to the image
         if is_me:
             message_html = f"""
             <div style='font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 12px; line-height: 1; white-space: normal; word-wrap: break-word; max-width: 100%;'>
@@ -845,143 +845,53 @@ class ChatWindow(QWidget):
             conv_widget.unread_dot.deleteLater()
             del conv_widget.unread_dot
     
-    # def load_messages(self, conversation_id):
-    #     response = requests.get(f"{BASE_URL}/get_messages/{conversation_id}")
-    #     if response.status_code == 200:
-    #         messages = response.json()
+    def load_messages(self, conversation_id, scroll_to_bottom=False):
+        print(f"DEBUG: ChatWindow - Memuat pesan untuk conv_id: {conversation_id}") # DEBUG
+        try:
+            response = requests.get(f"{BASE_URL}/get_messages/{conversation_id}", timeout=5)
+            print(f"DEBUG: ChatWindow - Status load_messages: {response.status_code}") # DEBUG
+            if response.status_code == 200:
+                try:
+                    messages_from_server = response.json()
+                except requests.exceptions.JSONDecodeError:
+                    print(f"DEBUG: ChatWindow - Gagal parse JSON dari /get_messages: {response.text}") # DEBUG
+                    messages_from_server = []
+                    
+                # Simpan pesan ke cache
+                self.message_cache[conversation_id] = messages_from_server # Simpan pesan ke cache
+                print(f"DEBUG: ChatWindow - Pesan untuk conv {conversation_id} disimpan ke cache. Jumlah: {len(messages_from_server)}")
+
+                while self.messages_layout.count() > 1: # Sisakan stretch item
+                    item_to_remove = self.messages_layout.takeAt(0)
+                    widget = item_to_remove.widget()
+                    if widget:
+                        widget.deleteLater()
+                
+                # Tampilkan pesan dari cache
+                if conversation_id in self.message_cache:
+                    for msg_data in self.message_cache[conversation_id]:
+                        self.add_message_to_ui( # Panggil add_message_to_ui yang sudah ada
+                            msg_data['message'], 
+                            msg_data['sender_id'] == self.user['id'],
+                            msg_data['sender_name'],
+                            msg_data['sent_at'],
+                            msg_data['id'], # msg_id penting untuk message_exists
+                            file_path=msg_data.get('file_path') # DIPERBARUI: Teruskan file_path
+                        )
+                        # bubble.msg_id = msg.get('id') # Simpan ID pesan di bubble
+                if scroll_to_bottom:
+                    QTimer.singleShot(100, self.scroll_to_bottom)
+                return self.message_cache.get(conversation_id, []) 
+            else:
+                print(f"DEBUG: ChatWindow - Gagal memuat pesan: {response.status_code} - {response.text}") # DEBUG
+        except requests.exceptions.RequestException as e:
+            print(f"DEBUG: ChatWindow - Error koneksi saat memuat pesan: {e}") # DEBUG
+        except Exception as e:
+            print(f"DEBUG: ChatWindow - Error tak terduga di load_messages: {e}") # DEBUG
             
-    #         # Clear existing messages
-    #         while self.messages_layout.count():
-    #             item = self.messages_layout.takeAt(0)
-    #             widget = item.widget()
-    #             if widget is not None:
-    #                 widget.deleteLater()
-            
-    #         # Add new messages
-    #         for msg in messages:
-    #             is_me = msg['sender_id'] == self.user['id']
-    #             bubble = BubbleMessage(
-    #                 msg['message'], 
-    #                 is_me,
-    #                 msg['sender_name'],
-    #                 msg['sent_at']
-    #             )
-                
-    #             # Create container for proper alignment
-    #             container = QWidget()
-    #             container_layout = QHBoxLayout()
-    #             container_layout.setContentsMargins(0, 0, 0, 0)
-                
-    #             if is_me:
-    #                 container_layout.addStretch()
-    #                 container_layout.addWidget(bubble)
-    #             else:
-    #                 container_layout.addWidget(bubble)
-    #                 container_layout.addStretch()
-                
-    #             container.setLayout(container_layout)
-    #             self.messages_layout.addWidget(container)
-            
-    #         # Scroll to bottom
-    #         QTimer.singleShot(100, self.scroll_to_bottom)
-    
-    def load_messages(self, conversation_id , scroll_to_bottom=False): 
-        response = requests.get(f"{BASE_URL}/get_messages/{conversation_id}") #
-        if response.status_code == 200:
-            messages = response.json()
-            
-            while self.messages_layout.count() > 1: # Sisakan item 'stretch'
-                item = self.messages_layout.takeAt(0)
-                widget = item.widget()
-                if widget is not None:
-                    widget.deleteLater()
-            
-            for msg in messages:
-                is_me = msg['sender_id'] == self.user['id']
-                bubble = BubbleMessage(
-                    msg['message'], 
-                    is_me,
-                    msg['sender_name'],
-                    msg['sent_at'],
-                    file_path=msg.get('file_path') # DIPERBARUI: Teruskan file_path
-                )
-                bubble.msg_id = msg.get('id') # Simpan ID pesan di bubble
-
-                container = QWidget()
-                container_layout = QHBoxLayout()
-                container_layout.setContentsMargins(0, 0, 0, 0)
-                
-                if is_me:
-                    container_layout.addStretch()
-                    container_layout.addWidget(bubble)
-                else:
-                    container_layout.addWidget(bubble)
-                    container_layout.addStretch()
-                
-                container.setLayout(container_layout)
-                self.messages_layout.insertWidget(self.messages_layout.count() - 1, container) # Masukkan sebelum 'stretch'
-            if scroll_to_bottom:
-                QTimer.singleShot(100, self.scroll_to_bottom)
-
-    # def handle_received_message(self, data): # data adalah dict berisi detail pesan
-    #     conv_id = data['conversation_id'] #
-    #     print("📨 Pesan baru diterima (Client):", data)
-
-    #     message_details = data['message'] # Ini adalah dictionary untuk pesan itu sendiri
-
-    #     if conv_id == self.current_conversation:
-    #         if not self.message_exists(message_details.get('id')): # Periksa menggunakan ID pesan
-    #             self.add_message_to_ui(message_details, scroll_to_bottom=True) # DIPERBARUI
-                
-    #             scrollbar = self.scroll_area.verticalScrollBar()
-    #             if scrollbar.value() >= scrollbar.maximum() - 20:
-    #                 QTimer.singleShot(100, self.scroll_to_bottom)
-    #     else:
-    #         self.mark_conversation_unread(data['conversation_id']) # Panggil dengan conv_id
-
-    # Modifikasi add_message_to_ui untuk menerima seluruh dictionary pesan
-    def add_message_to_ui(self, msg_data, scroll_to_bottom=True): # Tanda tangan DIPERBARUI, tambahkan scroll_to_bottom opsional
-        is_me = msg_data['sender_id'] == self.user['id']
-        bubble = BubbleMessage(
-            msg_data['message'],
-            is_me,
-            msg_data['sender_name'],
-            msg_data['sent_at'],
-            file_path=msg_data.get('file_path') # DIPERBARUI: Teruskan file_path
-        )
-        bubble.msg_id = msg_data.get('id') # Simpan ID pesan di bubble
-
-        container = QWidget()
-        container_layout = QHBoxLayout()
-        container_layout.setContentsMargins(0, 0, 0, 0)
-        
-        if is_me:
-            container_layout.addStretch()
-            container_layout.addWidget(bubble)
-        else:
-            container_layout.addWidget(bubble)
-            container_layout.addStretch()
-        
-        container.setLayout(container_layout)
-        self.messages_layout.insertWidget(self.messages_layout.count() - 1, container) # Masukkan sebelum 'stretch'
-        
-        if scroll_to_bottom: # Tambahkan kondisi ini
-            QTimer.singleShot(100, self.scroll_to_bottom)
-
-    def message_exists(self, msg_id):
-        if not msg_id: return False
-        for i in range(self.messages_layout.count() - 1): # Abaikan item 'stretch'
-            container_widget = self.messages_layout.itemAt(i).widget()
-            if container_widget:
-                bubble_widget = None
-                for j in range(container_widget.layout().count()):
-                    item = container_widget.layout().itemAt(j)
-                    if item and item.widget() and isinstance(item.widget(), BubbleMessage):
-                        bubble_widget = item.widget()
-                        break
-                if bubble_widget and hasattr(bubble_widget, 'msg_id') and bubble_widget.msg_id == msg_id:
-                    return True
-        return False
+        # Jika gagal, pastikan cache untuk conversation_id ini kosong atau sesuai keadaan
+        self.message_cache[conversation_id] = []
+        return [] # Kembalikan list kosong jika gagal
     
     def scroll_to_bottom(self):
         scrollbar = self.scroll_area.verticalScrollBar()

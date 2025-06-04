@@ -195,7 +195,7 @@ def admin_create_conversation():
                 'last_message_time': new_conv_data_row[6].strftime('%Y-%m-%d %H:%M:%S')
             }
             # Emit event ke semua IT client agar list mereka terupdate, atau minimal ke pembuatnya
-            socketio.emit('conversation_created', {'conversation_data': new_conv_details}, broadcast=True) # Contoh emit
+            socketio.emit('conversation_created', {'conversation_data': new_conv_details}) # Contoh emit
             return jsonify({'success': True, 'conversation_id': conversation_id, 'message': 'Conversation created successfully', 'conversation_details': new_conv_details})
         else:
             return jsonify({'success': True, 'conversation_id': conversation_id, 'message': 'Conversation created, but failed to fetch details.'})
@@ -267,6 +267,8 @@ def get_conversations(user_id):
         SELECT 
             c.id, 
             c.status, 
+            c.employee_id,
+            c.technician_id,
             e.full_name as employee_name, 
             t.full_name as tech_name,
             c.last_updated,
@@ -285,11 +287,13 @@ def get_conversations(user_id):
         conversations_data.append({
             'id': conv_row[0],
             'status': conv_row[1],
-            'employee_name': conv_row[2],
-            'tech_name': conv_row[3] if conv_row[3] else 'Belum ditugaskan',
-            'last_updated': conv_row[4].strftime('%Y-%m-%d %H:%M:%S') if conv_row[4] else None,
-            'last_message_preview': conv_row[5] if conv_row[5] else "No messages yet.", # Teks pesan terakhir
-            'last_message_time': conv_row[6].strftime('%Y-%m-%d %H:%M:%S') if conv_row[6] else (conv_row[4].strftime('%Y-%m-%d %H:%M:%S') if conv_row[4] else None) # Waktu pesan terakhir
+            'employee_id': conv_row[2],
+            'technician_id': conv_row[3],
+            'employee_name': conv_row[4],
+            'tech_name': conv_row[5] if conv_row[5] else 'Belum ditugaskan',
+            'last_updated': conv_row[6].strftime('%Y-%m-%d %H:%M:%S') if conv_row[6] else None,
+            'last_message_preview': conv_row[7] if conv_row[7] else "No messages yet.", # Teks pesan terakhir
+            'last_message_time': conv_row[8].strftime('%Y-%m-%d %H:%M:%S') if conv_row[8] else (conv_row[6].strftime('%Y-%m-%d %H:%M:%S') if conv_row[6] else None) # Waktu pesan terakhir
         })
     cur.close()
     return jsonify(conversations_data)
@@ -394,7 +398,7 @@ def send_message():
                 'message': message_data_row[3],
                 'sent_at': message_data_row[4].strftime('%Y-%m-%d %H:%M:%S')
             }
-        }) # broadcast=True akan mengirim ke semua klien yang terhubung
+        })
         return jsonify({'success': True, 'message_id': new_message_id})
     else:
         return jsonify({'success': False, 'message': 'Failed to retrieve sent message details'}), 500
@@ -546,14 +550,165 @@ def add_user():
         print(f"Error adding user: {e}")
         return jsonify({'success': False, 'message': f'Database error: {str(e)}'}), 500
 
-# ... (kode server.py yang sudah ada) ...
+# @app.route('/delete_conversation/<int:conv_id>', methods=['DELETE'])
+# def delete_conversation_route(conv_id):
+#     cur = None
+#     try:
+#         cur = mysql.connection.cursor()
 
+#         # Cek dulu apakah percakapan ada
+#         cur.execute("SELECT employee_id, technician_id FROM conversations WHERE id = %s", (conv_id,))
+#         conversation_exists = cur.fetchone()
+#         if not conversation_exists:
+#             cur.close()
+#             return jsonify({'success': False, 'message': f'Percakapan ID {conv_id} tidak ditemukan.'}), 404
 
+#         # (Opsional) Ambil file_path dari pesan yang akan dihapus jika ingin menghapus file fisik
+#         cur.execute("SELECT file_path FROM messages WHERE conversation_id = %s AND file_path IS NOT NULL", (conv_id,))
+#         files_to_delete_on_disk = [row[0] for row in cur.fetchall()]
 
-# ... (sisa kode server.py) ...
-# ... (sisa kode server.py) ...
+#         # Langkah 1: Atur last_message_id menjadi NULL di tabel conversations untuk percakapan ini.
+#         # Ini menghilangkan referensi foreign key ke tabel messages, sehingga pesan bisa dihapus.
+#         cur.execute("UPDATE conversations SET last_message_id = NULL WHERE id = %s", (conv_id,))
+#         print(f"DEBUG: Server - last_message_id di-set NULL untuk percakapan ID: {conv_id}")
 
+#         # Langkah 2: Hapus semua pesan yang terkait dengan conversation_id ini.
+#         cur.execute("DELETE FROM messages WHERE conversation_id = %s", (conv_id,))
+#         deleted_messages_count = cur.rowcount
+#         print(f"DEBUG: Server - Menghapus {deleted_messages_count} pesan dari percakapan ID: {conv_id}")
 
+#         # Langkah 3: Hapus percakapan itu sendiri dari tabel conversations.
+#         cur.execute("DELETE FROM conversations WHERE id = %s", (conv_id,))
+#         deleted_conversations_count = cur.rowcount
+#         print(f"DEBUG: Server - Menghapus {deleted_conversations_count} percakapan dengan ID: {conv_id}")
+        
+#         mysql.connection.commit() # Commit transaksi
+
+#         # Langkah 4: (Opsional Lanjutan) Hapus file fisik dari folder 'uploads'.
+#         if files_to_delete_on_disk:
+#             print(f"DEBUG: Server - Mencoba menghapus file fisik untuk percakapan ID: {conv_id}")
+#             for filename in files_to_delete_on_disk:
+#                 if filename:
+#                     try:
+#                         file_location = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+#                         if os.path.exists(file_location):
+#                             os.remove(file_location)
+#                             print(f"DEBUG: Server - File fisik '{filename}' berhasil dihapus.")
+#                         else:
+#                             print(f"DEBUG: Server - File fisik '{filename}' tidak ditemukan di disk.")
+#                     except Exception as e_file_delete:
+#                         print(f"DEBUG: Server - Error saat menghapus file fisik '{filename}': {e_file_delete}")
+        
+#         socketio.emit('conversation_deleted', {'conversation_id': conv_id})
+#         print(f"DEBUG: Server - Mengirim event 'conversation_deleted' untuk ID: {conv_id}")
+
+#         cur.close()
+#         return jsonify({'success': True, 'message': f'Percakapan ID {conv_id} dan semua pesannya berhasil dihapus.'})
+
+#     except Exception as e:
+#         if cur:
+#             mysql.connection.rollback()
+#             cur.close()
+#         print(f"DEBUG: Server - Error saat menghapus percakapan ID {conv_id}: {e}")
+#         # Error (1451) adalah OperationalError dari PyMySQL/MySQLdb, detailnya ada di e.args
+#         error_code = ""
+#         if hasattr(e, 'args') and len(e.args) > 0:
+#             error_code = f" (Kode Error DB: {e.args[0]})"
+#         return jsonify({'success': False, 'message': f'Terjadi kesalahan pada server{error_code}: {str(e)}'}), 500
+
+@app.route('/delete_user/<int:user_id_to_delete>', methods=['DELETE'])
+def delete_user_route(user_id_to_delete):
+    # TODO: Di aplikasi produksi, tambahkan otorisasi yang kuat di sini.
+    # Misalnya, periksa apakah pengguna yang meminta adalah teknisi.
+    # Untuk saat ini, kita asumsikan permintaan dari it.py (teknisi) diotorisasi.
+    # Juga, pastikan teknisi tidak bisa menghapus dirinya sendiri atau teknisi lain melalui endpoint ini jika tidak diinginkan.
+
+    cur = None
+    try:
+        cur = mysql.connection.cursor()
+
+        # 1. Pastikan user yang akan dihapus ada dan adalah 'employee' (sesuai asumsi dari klien)
+        cur.execute("SELECT role, full_name FROM users WHERE id = %s", (user_id_to_delete,))
+        user_to_delete_details = cur.fetchone()
+
+        if not user_to_delete_details:
+            cur.close()
+            return jsonify({'success': False, 'message': f'User dengan ID {user_id_to_delete} tidak ditemukan.'}), 404
+        
+        user_role = user_to_delete_details[0]
+        user_full_name = user_to_delete_details[1]
+
+        if user_role != 'employee':
+            cur.close()
+            return jsonify({'success': False, 'message': f'Hanya user dengan peran "employee" yang bisa dihapus melalui endpoint ini. User ID {user_id_to_delete} adalah seorang "{user_role}".'}), 403 # Forbidden
+
+        # 2. Dapatkan semua ID percakapan di mana user ini adalah 'employee_id'
+        cur.execute("SELECT id FROM conversations WHERE employee_id = %s", (user_id_to_delete,))
+        conversation_ids_tuples = cur.fetchall()
+        conversation_ids_to_delete = [conv_tuple[0] for conv_tuple in conversation_ids_tuples]
+        
+        print(f"DEBUG: Server - Akan menghapus percakapan dengan ID: {conversation_ids_to_delete} yang terkait dengan user ID: {user_id_to_delete}")
+
+        all_files_to_delete_on_disk = []
+
+        if conversation_ids_to_delete:
+            for conv_id in conversation_ids_to_delete:
+                # a. (Opsional) Ambil file_path dari pesan yang akan dihapus
+                cur.execute("SELECT file_path FROM messages WHERE conversation_id = %s AND file_path IS NOT NULL", (conv_id,))
+                files_in_conv = [row[0] for row in cur.fetchall()]
+                all_files_to_delete_on_disk.extend(files_in_conv)
+
+                # b. Atur last_message_id menjadi NULL di tabel conversations untuk percakapan ini
+                cur.execute("UPDATE conversations SET last_message_id = NULL WHERE id = %s", (conv_id,))
+                
+                # c. Hapus pesan dari percakapan ini
+                cur.execute("DELETE FROM messages WHERE conversation_id = %s", (conv_id,))
+                print(f"DEBUG: Server - Menghapus pesan dari percakapan ID: {conv_id}")
+
+            # d. Hapus semua percakapan yang terkait setelah pesannya dihapus
+            # Gunakan %s placeholder untuk setiap ID dalam list
+            format_strings = ','.join(['%s'] * len(conversation_ids_to_delete))
+            cur.execute(f"DELETE FROM conversations WHERE id IN ({format_strings})", tuple(conversation_ids_to_delete))
+            print(f"DEBUG: Server - Menghapus percakapan dengan ID: {conversation_ids_to_delete}")
+        
+        # 3. Hapus user itu sendiri dari tabel users
+        cur.execute("DELETE FROM users WHERE id = %s AND role = 'employee'", (user_id_to_delete,)) # Dobel cek role
+        deleted_user_count = cur.rowcount
+        print(f"DEBUG: Server - Menghapus {deleted_user_count} user dengan ID: {user_id_to_delete}")
+
+        mysql.connection.commit() # Commit transaksi jika semua query berhasil
+
+        # 4. (Opsional Lanjutan) Hapus file fisik dari folder 'uploads'
+        if all_files_to_delete_on_disk:
+            print(f"DEBUG: Server - Mencoba menghapus file fisik yang terkait dengan user ID: {user_id_to_delete}")
+            for filename in all_files_to_delete_on_disk:
+                if filename:
+                    try:
+                        file_location = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                        if os.path.exists(file_location):
+                            os.remove(file_location)
+                            print(f"DEBUG: Server - File fisik '{filename}' berhasil dihapus.")
+                        else:
+                            print(f"DEBUG: Server - File fisik '{filename}' tidak ditemukan di disk.")
+                    except Exception as e_file_delete:
+                        print(f"DEBUG: Server - Error saat menghapus file fisik '{filename}': {e_file_delete}")
+        
+        # Emit event ke klien lain bahwa user dan percakapannya telah dihapus
+        socketio.emit('user_deleted', {'user_id': user_id_to_delete, 'deleted_conversation_ids': conversation_ids_to_delete})
+        print(f"DEBUG: Server - Mengirim event 'user_deleted' untuk user ID: {user_id_to_delete}")
+
+        cur.close()
+        return jsonify({'success': True, 'message': f'User {user_full_name} (ID: {user_id_to_delete}) dan semua data terkait berhasil dihapus.'})
+
+    except Exception as e:
+        if cur:
+            mysql.connection.rollback()
+            cur.close()
+        print(f"DEBUG: Server - Error saat menghapus user ID {user_id_to_delete}: {e}")
+        error_code = ""
+        if hasattr(e, 'args') and len(e.args) > 0:
+            error_code = f" (Kode Error DB: {e.args[0]})"
+        return jsonify({'success': False, 'message': f'Terjadi kesalahan pada server saat menghapus user{error_code}: {str(e)}'}), 500
 
 
 
