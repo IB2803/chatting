@@ -13,9 +13,11 @@ from werkzeug.utils import secure_filename
 from flask import Flask, request, jsonify, send_from_directory
 from apscheduler.schedulers.background import BackgroundScheduler
 
-IP = "192.168.45.140"
-# IP = "192.168.1.8"
+IP = "192.168.45.171"
+# IP = "192.168.1.7"
 PORT = "5000"
+
+
 
 app = Flask(__name__)
 CORS(app, resources={
@@ -137,29 +139,94 @@ def start_scheduler():
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
-
 @app.route('/get_users_by_role/<string:role_name>', methods=['GET'])
 def get_users_by_role(role_name):
-    # Isi fungsi seperti yang sudah kita diskusikan sebelumnya
-    if role_name not in ['employee', 'technician']:
-        return jsonify({'success': False, 'message': 'Invalid role specified'}), 400
+    # Untuk CreateConversationDialog, client memanggil untuk 'employee' dan 'technician'.
+    # Permintaan untuk 'technician' dari client sekarang berarti "berikan saya daftar staf support yang bisa ditugaskan".
+    
+    # Definisikan role_name apa saja yang valid diterima di path URL endpoint ini
+    valid_roles_in_path = ['employee', 'technician'] 
+    # Jika Anda juga ingin bisa memanggil /get_users_by_role/ga secara terpisah untuk daftar GA saja, tambahkan 'ga' di sini.
+    # Namun untuk kasus dialog, client hanya akan meminta 'technician' (untuk support) dan 'employee'.
+
+    if role_name not in valid_roles_in_path:
+        return jsonify({'success': False, 'message': f'Listing untuk role "{role_name}" tidak valid atau tidak didukung.'}), 400
 
     cur = mysql.connection.cursor()
     try:
-        cur.execute("SELECT id, full_name FROM users WHERE role = %s ORDER BY full_name ASC", (role_name,))
+        sql_query = ""
+        sql_params = []
+
+        if role_name == 'technician': 
+            # Jika client meminta daftar 'technician', server memberikan 'technician' DAN 'ga'
+            sql_query = "SELECT id, full_name FROM users WHERE role = %s OR role = %s ORDER BY full_name ASC"
+            sql_params = ['technician', 'ga']
+        elif role_name == 'employee':
+            sql_query = "SELECT id, full_name FROM users WHERE role = %s ORDER BY full_name ASC"
+            sql_params = [role_name] # role_name akan berisi 'employee'
+        # else:
+            # Kasus lain seharusnya sudah ditangani oleh validasi 'valid_roles_in_path' di atas.
+            # Jika Anda menambahkan 'ga' ke 'valid_roles_in_path' untuk panggilan langsung /get_users_by_role/ga:
+            # sql_query = "SELECT id, full_name FROM users WHERE role = %s ORDER BY full_name ASC"
+            # sql_params = ['ga']
+
+
+        if not sql_query: # Fallback jika logika di atas tidak menghasilkan query (seharusnya tidak terjadi)
+            cur.close()
+            return jsonify({'success': False, 'message': 'Internal server error: Role tidak terdefinisi untuk query.'}), 500
+
+        cur.execute(sql_query, tuple(sql_params))
         users = [{'id': row[0], 'full_name': row[1]} for row in cur.fetchall()]
         cur.close()
         return jsonify({'success': True, 'users': users})
     except Exception as e:
         cur.close()
-        print(f"Error fetching users by role {role_name}: {e}") # Perhatikan output server jika ada error di sini
-        return jsonify({'success': False, 'message': str(e)}), 500
+        # Ini akan mencetak error Python asli ke konsol server, sangat berguna untuk debugging!
+        print(f"SERVER_ERROR di /get_users_by_role untuk role '{role_name}': {e}") 
+        return jsonify({'success': False, 'message': f'Gagal mengambil pengguna: {str(e)}'}), 500
+# @app.route('/get_users_by_role/<string:role_name>', methods=['GET'])
+# def get_users_by_role(role_name):
+#     # Isi fungsi seperti yang sudah kita diskusikan sebelumnya
+#     if role_name not in ['employee', 'technician', 'ga']:
+#         return jsonify({'success': False, 'message': 'Invalid role specified'}), 400
+
+#     cur = mysql.connection.cursor()
+#     try:
+#         query_sql = "SELECT id, full_name FROM users WHERE "
+#         params = []
+
+#         if role_name == 'technician':
+#             # Jika client meminta 'technician', berikan daftar semua yang bisa jadi support
+#             query_sql += "(role = %s )"
+#             params.extend('technician')
+#         elif role_name == 'employee':
+#             query_sql += "role = %s"
+#             params.append('employee')
+#         # Jika Anda menambahkan 'ga' ke allowed_roles_for_path dan ingin endpoint khusus untuk list GA:
+#         elif role_name == 'ga':
+#             query_sql += "role = %s"
+#             params.append('ga')
+#         else:
+#             # Ini seharusnya tidak terjadi jika validasi di atas sudah benar
+#             cur.close()
+#             return jsonify({'success': False, 'message': 'Internal server error: Unhandled role for query construction.'}), 500
+
+#         query_sql += " ORDER BY full_name ASC"
+#         cur.execute(query_sql, tuple(params))
+#         users = [{'id': row[0], 'full_name': row[1]} for row in cur.fetchall()]
+#         cur.close()
+#         return jsonify({'success': True, 'users': users})
+#     except Exception as e:
+#         cur.close()
+#         print(f"Error fetching users by role (custom logic) {role_name}: {e}")
+#         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/admin_create_conversation', methods=['POST'])
 def admin_create_conversation():
     data = request.get_json()
     employee_id = data.get('employee_id')
     technician_id = data.get('technician_id')
+    ga_id = data.get('ga_id')  # Jika diperlukan, bisa ditambahkan validasi untuk GA
 
     if not employee_id or not technician_id:
         return jsonify({'success': False, 'message': 'Employee ID and Technician ID are required'}), 400
@@ -176,9 +243,9 @@ def admin_create_conversation():
         # Validasi technician
         cur.execute("SELECT role FROM users WHERE id = %s", (technician_id,))
         technician_user = cur.fetchone()
-        if not technician_user or technician_user[0] != 'technician': #
+        if not technician_user or technician_user[0] not in ['technician', 'ga']: #
             cur.close()
-            return jsonify({'success': False, 'message': 'Invalid Technician ID or user is not a technician'}), 400
+            return jsonify({'success': False, 'message': 'Invalid Technician/GA ID or user is not a technician or GA support role'}), 400
 
         # Opsional: Cek apakah sudah ada percakapan terbuka antara keduanya
         cur.execute("SELECT id FROM conversations WHERE employee_id = %s AND technician_id = %s AND status = 'open'", (employee_id, technician_id)) #
@@ -365,7 +432,7 @@ def create_conversation():
     cur = mysql.connection.cursor()
     cur.execute("""
         SELECT id FROM users 
-        WHERE role = 'technician' 
+        WHERE role = 'technician' OR role = 'ga' 
         ORDER BY RAND() LIMIT 1
     """)
     tech = cur.fetchone()
@@ -543,15 +610,17 @@ def add_user():
     if not all([username, full_name, role]):
         return jsonify({'success': False, 'message': 'Username, Full Name, and Role are required fields'}), 400
 
-    if role not in ['employee', 'technician']:
+    if role not in ['employee', 'technician', 'ga']:
         return jsonify({'success': False, 'message': 'Invalid role specified'}), 400
 
     hashed_password = None # Default ke None (untuk employee tanpa password)
 
-    if role == 'technician':
+    if role == 'technician' or role == 'ga':
         if not password: # Password wajib untuk teknisi
             return jsonify({'success': False, 'message': 'Password is required for technician role'}), 400
         hashed_password = hash_password(password)
+    
+        
     elif role == 'employee':
         if password: # Jika employee mengisi password, kita hash
             hashed_password = hash_password(password)
