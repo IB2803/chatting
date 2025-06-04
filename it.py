@@ -446,9 +446,9 @@ class ChatWindow(QWidget):
         search_layout = QHBoxLayout()
         search_layout.setContentsMargins(20, 10, 20, 10)
         
-        search_input = QLineEdit()
-        search_input.setPlaceholderText("🔍 Search messages...")
-        search_input.setStyleSheet("""
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("🔍 Search messages...")
+        self.search_input.setStyleSheet("""
             QLineEdit {
                 background-color: #F1F3F4;
                 border: none;
@@ -462,7 +462,11 @@ class ChatWindow(QWidget):
                 border: 2px solid #4A90E2;
             }
         """)
-        search_layout.addWidget(search_input)
+        # Hubungkan sinyal textChanged ke metode filter_conversations
+        self.search_input.textChanged.connect(self.filter_conversations)
+
+        
+        search_layout.addWidget(self.search_input)
         search_widget.setLayout(search_layout)
         sidebar_layout.addWidget(search_widget)
         
@@ -791,6 +795,38 @@ class ChatWindow(QWidget):
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             }
         """)
+        
+    def filter_conversations(self, text):
+        search_text = text.lower().strip() # Teks pencarian, lowercase, dan hapus spasi di awal/akhir
+
+        for i in range(self.conversation_list.count()):
+            item = self.conversation_list.item(i) # QListWidgetItem
+            widget = self.conversation_list.itemWidget(item) # ConversationItem widget
+
+            if widget and hasattr(widget, 'conversation_data'):
+                conv_data = widget.conversation_data
+                
+                # Tentukan nama yang akan dicari berdasarkan peran pengguna yang login
+                name_to_check = ""
+                if self.user['role'] == 'technician': # Teknisi mencari nama employee
+                    name_to_check = conv_data.get('employee_name', '').lower()
+                elif self.user['role'] == 'employee': # Employee mencari nama teknisi
+                    name_to_check = conv_data.get('tech_name', '').lower()
+                
+                # Jika teks pencarian kosong, tampilkan semua item
+                if not search_text:
+                    item.setHidden(False)
+                else:
+                    # Sembunyikan item jika nama tidak mengandung teks pencarian
+                    if search_text in name_to_check:
+                        item.setHidden(False)
+                    else:
+                        item.setHidden(True)
+            else:
+                # Jika tidak ada widget atau conversation_data, defaultnya tampilkan saja
+                # atau sembunyikan jika ada teks pencarian (tergantung preferensi)
+                item.setHidden(bool(search_text)) 
+
 
     def handle_new_custom_conversation_click(self):
         dialog = CreateConversationDialog(self)
