@@ -1654,23 +1654,26 @@ class CreateConversationDialog(QDialog):
 
         # Load Technicians
         try:
-            response_tech = requests.get(f"{BASE_URL}/get_users_by_role/technician")
+            response_tech = requests.get(f"{BASE_URL}/get_users_by_role/technician") # Panggilan ke server
             if response_tech.status_code == 200 and response_tech.json().get('success'):
                 technicians = response_tech.json().get('users', [])
                 self.technician_combo.clear()
                 if not technicians:
-                    self.technician_combo.addItem("No technicians found", -1)
+                    self.technician_combo.addItem("Tidak ada Teknisi/GA ditemukan", -1) # Perbarui teks placeholder jika perlu
                 else:
-                    self.technician_combo.addItem("-- Select Technician --", -1) # Placeholder
+                    self.technician_combo.addItem("-- Pilih Teknisi/GA --", -1) # Perbarui teks placeholder
                     for tech in technicians:
                         self.technician_combo.addItem(tech['full_name'], tech['id'])
             else:
-                self.technician_combo.addItem("Error loading technicians", -1)
-                print(f"Error fetching technicians: {response_tech.text}")
+                # Jika error terjadi, teks dari server akan dicetak di sini
+                self.technician_combo.addItem("Error memuat Teknisi/GA", -1) 
+                print(f"CLIENT_ERROR: Gagal mengambil Teknisi/GA. Status: {response_tech.status_code}. Respons: {response_tech.text}")
         except requests.exceptions.RequestException as e:
-            self.technician_combo.addItem("Connection error", -1)
-            print(f"Connection error fetching technicians: {e}")
-
+            self.technician_combo.addItem("Error koneksi (Teknisi/GA)", -1)
+            print(f"CLIENT_ERROR: Error koneksi saat mengambil Teknisi/GA: {e}")
+        except json.JSONDecodeError as e:
+            self.technician_combo.addItem("Error format data (Teknisi/GA)", -1)
+            print(f"CLIENT_ERROR: Gagal parse JSON dari server (Teknisi/GA). Respons: {response_tech.text}. Error: {e}")
 
     def get_selected_ids(self):
         employee_id = self.employee_combo.currentData()
@@ -1714,7 +1717,7 @@ class AddUserDialog(QDialog):
         # Role
         self.role_label = QLabel("Role:")
         self.role_combo = QComboBox()
-        self.role_combo.addItems(["employee", "technician"])
+        self.role_combo.addItems(["employee", "technician","ga"])
         layout.addWidget(self.role_label)
         layout.addWidget(self.role_combo)
 
