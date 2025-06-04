@@ -6,11 +6,13 @@ import threading
 import time
 import socketio
 
+from PyQt5.QtMultimedia import QSoundEffect
+from PyQt5.QtWidgets import QFileDialog
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QListWidget, QTextEdit,
     QScrollArea, QFrame, QSizePolicy, QListWidgetItem, QGraphicsDropShadowEffect,
-    QFileDialog, QMessageBox, QComboBox, QDialog, QToolButton, QMenu, QStyle
+    QFileDialog, QMessageBox, QComboBox, QDialog, QSpacerItem, QSizePolicy, QToolButton, QMenu, QStyle
 )
 from PyQt5.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply # Untuk memuat gambar secara asinkron
 from PyQt5.QtCore import pyqtSignal, Qt, QTimer, QUrl, QMimeData, QDir, QStandardPaths
@@ -20,8 +22,8 @@ from PyQt5.QtGui import QColor, QFont, QPainter, QBrush, QPalette, QPixmap, QIco
 # Suppress font warnings
 os.environ['QT_LOGGING_RULES'] = 'qt.qpa.fonts=false'
 
-IP = "192.168.45.140"
-# IP = "192.168.1.8"
+IP = "192.168.45.171"
+# IP = "192.168.1.7"
 PORT = "5000"
 
 # BASE_URL = "http://localhost:5000"
@@ -358,6 +360,26 @@ class ChatWindow(QWidget):
             self.chat_options_button.hide()
         self.load_conversations() # Panggil setelah setup_ui
         
+            # --- INISIALISASI SUARA NOTIFIKASI ---
+        self.message_sound = QSoundEffect(self) # 'self' sebagai parent
+
+        # Tentukan path ke file suara
+        # Asumsi 'notification.wav' ada di direktori yang sama dengan script
+        sound_file_name = "akh.wav" 
+        # Path bisa juga: os.path.join("sounds", "notification.wav") jika di subfolder 'sounds'
+
+        # Dapatkan path direktori tempat script dijalankan
+        current_script_dir = os.path.dirname(os.path.abspath(__file__))
+        sound_file_path = os.path.join(current_script_dir, sound_file_name)
+
+        if os.path.exists(sound_file_path):
+            self.message_sound.setSource(QUrl.fromLocalFile(sound_file_path))
+            self.message_sound.setVolume(1.0)  # Atur volume antara 0.0 (sunyi) dan 1.0 (maks)
+            print(f"Sound effect loaded from: {sound_file_path}")
+        else:
+            print(f"WARNING: Sound file not found at '{sound_file_path}'. Sound notifications will be disabled.")
+            self.message_sound = None # Nonaktifkan jika file tidak ditemukan
+        # --- AKHIR INISIALISASI SUARA ---
         # Timer untuk refresh
         self.timer = QTimer(self)
         # self.timer.timeout.connect(self.refresh_messages)
@@ -495,6 +517,20 @@ class ChatWindow(QWidget):
         
         # Tombol "Add User" (jika hanya untuk technician/admin)
         if self.user['role'] == 'technician': # Misal hanya teknisi yang bisa tambah user
+            self.add_user_btn = QPushButton("👤 Add User")
+            # ... (style dan connect add_user_btn seperti sebelumnya) ...
+            self.add_user_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #2ECC71; color: white; border: none;
+                    padding: 10px; border-radius: 18px; font-size: 13px;
+                    font-weight: 500; margin: 5px 20px;
+                }
+                QPushButton:hover { background-color: #27AE60; }
+                QPushButton:pressed { background-color: #1E8449; }
+            """)
+            self.add_user_btn.clicked.connect(self.handle_add_user_button_click)
+            sidebar_layout.addWidget(self.add_user_btn)
+
             # Tombol "New Custom Conversation" untuk technician
             self.new_custom_conv_btn = QPushButton("💬+ New Custom Conversation")
             self.new_custom_conv_btn.setStyleSheet("""
@@ -509,21 +545,33 @@ class ChatWindow(QWidget):
             """)
             self.new_custom_conv_btn.clicked.connect(self.handle_new_custom_conversation_click)
             sidebar_layout.addWidget(self.new_custom_conv_btn)
-
-            self.add_user_btn = QPushButton("👤 Add User")
-            # ... (style dan connect add_user_btn seperti sebelumnya) ...
-            self.add_user_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #2ECC71; color: white; border: none;
-                    padding: 10px; border-radius: 18px; font-size: 13px;
-                    font-weight: 500; margin: 5px 20px;
-                }
-                QPushButton:hover { background-color: #27AE60; }
-                QPushButton:pressed { background-color: #1E8449; }
-            """)
-            self.add_user_btn.clicked.connect(self.handle_add_user_button_click)
-            sidebar_layout.addWidget(self.add_user_btn)
-        
+            
+        chat_header_layout = QHBoxLayout()
+        chat_header_layout.setContentsMargins(24, 15, 24, 20) 
+        # Spacer kiri (untuk atur posisi tombol ke kanan jika mau)
+      
+        #  Tombol "Back" untuk kembali ke daftar percakapan
+        self.back_button = QPushButton("←") # Atau gunakan QIcon jika punya ikon panah
+        self.back_button.setFixedSize(30, 30)
+        self.back_button.setStyleSheet("""
+            QPushButton {
+                color: white;
+                font-size: 30px;
+                font-weight:  600;
+                border: none;
+                border-radius: 15px; /* Membuatnya bulat */
+                background-color: transparent; /* Transparan awal */
+            }
+            QPushButton:hover {
+                background-color: rgba(255, 255, 255, 0.2); /* Efek hover */
+            }
+            QPushButton:pressed {
+                background-color: rgba(255, 255, 255, 0.3); /* Efek tekan */
+            }
+        """)
+        self.back_button.clicked.connect(self.go_back_to_selection_view)
+        self.back_button.setVisible(False) # Sembunyikan di awal, tampilkan saat chat dipilih
+        chat_header_layout.addWidget(self.back_button)
         
         
         
@@ -545,8 +593,7 @@ class ChatWindow(QWidget):
             }
         """)
         
-        chat_header_layout = QHBoxLayout()
-        chat_header_layout.setContentsMargins(24, 15, 24, 15)
+
         
         # User avatar and info
         self.chat_avatar = QLabel()
@@ -827,7 +874,30 @@ class ChatWindow(QWidget):
                 # atau sembunyikan jika ada teks pencarian (tergantung preferensi)
                 item.setHidden(bool(search_text)) 
 
-
+    def update_chat_input_active_state(self, active: bool):
+        """Mengatur status aktif/nonaktif untuk area input pesan."""
+        self.message_input.setEnabled(active)
+        self.send_btn.setEnabled(active)
+        self.attach_btn.setEnabled(active)
+        if active:
+            self.message_input.setPlaceholderText("Add a comment or paste a file...")
+        else:
+            self.message_input.setPlaceholderText("Select a conversation to chat")
+        # Seluruh input area bisa disembunyikan/ditampilkan jika diinginkan
+    def update_chat_input_active_state(self, active: bool):
+        """Mengatur status aktif/nonaktif untuk area input pesan."""
+        self.message_input.setEnabled(active)
+        self.send_btn.setEnabled(active)
+        self.attach_btn.setEnabled(active)
+        if active:
+            self.message_input.setPlaceholderText("Add a comment or paste a file...")
+        else:
+            self.message_input.setPlaceholderText("Select a conversation to chat")
+        # Seluruh input area bisa disembunyikan/ditampilkan jika diinginkan
+        # self.input_area_widget.setVisible(active) # Opsional, jika ingin menyembunyikan seluruh bar input
+    
+    
+    
     def handle_new_custom_conversation_click(self):
         dialog = CreateConversationDialog(self)
         if dialog.exec_() == QDialog.Accepted:
@@ -1173,7 +1243,8 @@ class ChatWindow(QWidget):
                     widget.deleteLater()
             self.current_conversation = None
             return
-
+        self.update_chat_input_active_state(True)
+        self.back_button.setVisible(True)
         conversation_id = item.data(Qt.UserRole)
         print(f"DEBUG: ChatWindow - Memilih percakapan ID: {conversation_id}") # DEBUG
         self.current_conversation = conversation_id
@@ -1203,7 +1274,7 @@ class ChatWindow(QWidget):
         
         self.load_messages(conversation_id, scroll_to_bottom=True) # Muat pesan
         self.unread_map[conversation_id] = False
-        
+        # item.setSelected(False) # Hapus highlight biru bawaan QListWidget
         # Reset style dasar ConversationItem
         default_item_style = ConversationItem(conv_data, self.user['role'], "").styleSheet() # Dapatkan style dasar
         conv_widget.setStyleSheet(default_item_style)
@@ -1221,15 +1292,39 @@ class ChatWindow(QWidget):
                 processed_preview = actual_last_preview[:MAX_PREVIEW_LENGTH - 3] + "..."
 
             conv_widget.preview_label.setText(processed_preview)
-            conv_widget.preview_label.setStyleSheet("color: #7F8C8D; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 190px;") # Pastikan style normal
-        default_style = """
-            ConversationItem { background-color: transparent; border-radius: 8px; }
-            ConversationItem:hover { background-color: #F8F9FA; }
-        """
-        conv_widget.setStyleSheet(default_style)
+            conv_widget.preview_label.setStyleSheet("""
+                QLabel {
+                    color: #7F8C8D; /* Warna normal */
+                    font-size: 13px;
+                    /* Hapus properti CSS penyebab warning jika masih ada */
+                }
+            """)
+            
+    def go_back_to_selection_view(self):
+        # 1. Bersihkan area pesan
+        while self.messages_layout.count() > 1: # Sisakan item 'stretch' di akhir
+            item = self.messages_layout.takeAt(0) # Ambil dari atas
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
 
+        # 2. Reset header chat
+        self.chat_name.setText("Select a conversation")
+        self.chat_status.setText("Choose a chat to start messaging")
+        self.chat_avatar.setText("") # Kosongkan avatar
+        self.back_button.setVisible(False) # Sembunyikan tombol back lagi
 
-    
+        # 3. Set current_conversation menjadi None
+        self.current_conversation = None
+
+        # 4. Nonaktifkan area input pesan
+        self.update_chat_input_active_state(False)
+
+        # 5. (Opsional) Hapus sorotan dari QListWidget jika ada
+        if self.conversation_list.currentItem():
+            self.conversation_list.currentItem().setSelected(False)
+            self.conversation_list.setCurrentItem(None) # Ini penting untuk menghapus fokus    
+            
     def load_messages(self, conversation_id, scroll_to_bottom=False):
         print(f"DEBUG: ChatWindow - Memuat pesan untuk conv_id: {conversation_id}") # DEBUG
         try:
@@ -1291,7 +1386,11 @@ class ChatWindow(QWidget):
         conv_id = data['conversation_id']
         message_content = data['message'] # Ini dictionary: {id, message, sender_id, sender_name, sent_at}
         print(f"DEBUG: IT/handle_received_message - 📨 Pesan baru untuk conv_id {conv_id}: {message_content.get('message')}")
-
+        # --- MAINKAN SUARA JIKA PESAN DARI ORANG LAIN ---
+        if self.message_sound and message_content.get('sender_id') != self.user['id']:
+            self.message_sound.play()
+            # print("Playing notification sound.") # Debug
+        # --- AKHIR MAINKAN SUARA ---
         # 1. Tambahkan pesan ke cache
         if conv_id not in self.message_cache:
             self.message_cache[conv_id] = []
@@ -1625,23 +1724,26 @@ class CreateConversationDialog(QDialog):
 
         # Load Technicians
         try:
-            response_tech = requests.get(f"{BASE_URL}/get_users_by_role/technician")
+            response_tech = requests.get(f"{BASE_URL}/get_users_by_role/technician") # Panggilan ke server
             if response_tech.status_code == 200 and response_tech.json().get('success'):
                 technicians = response_tech.json().get('users', [])
                 self.technician_combo.clear()
                 if not technicians:
-                    self.technician_combo.addItem("No technicians found", -1)
+                    self.technician_combo.addItem("Tidak ada Teknisi/GA ditemukan", -1) # Perbarui teks placeholder jika perlu
                 else:
-                    self.technician_combo.addItem("-- Select Technician --", -1) # Placeholder
+                    self.technician_combo.addItem("-- Pilih Teknisi/GA --", -1) # Perbarui teks placeholder
                     for tech in technicians:
                         self.technician_combo.addItem(tech['full_name'], tech['id'])
             else:
-                self.technician_combo.addItem("Error loading technicians", -1)
-                print(f"Error fetching technicians: {response_tech.text}")
+                # Jika error terjadi, teks dari server akan dicetak di sini
+                self.technician_combo.addItem("Error memuat Teknisi/GA", -1) 
+                print(f"CLIENT_ERROR: Gagal mengambil Teknisi/GA. Status: {response_tech.status_code}. Respons: {response_tech.text}")
         except requests.exceptions.RequestException as e:
-            self.technician_combo.addItem("Connection error", -1)
-            print(f"Connection error fetching technicians: {e}")
-
+            self.technician_combo.addItem("Error koneksi (Teknisi/GA)", -1)
+            print(f"CLIENT_ERROR: Error koneksi saat mengambil Teknisi/GA: {e}")
+        except json.JSONDecodeError as e:
+            self.technician_combo.addItem("Error format data (Teknisi/GA)", -1)
+            print(f"CLIENT_ERROR: Gagal parse JSON dari server (Teknisi/GA). Respons: {response_tech.text}. Error: {e}")
 
     def get_selected_ids(self):
         employee_id = self.employee_combo.currentData()
@@ -1685,7 +1787,7 @@ class AddUserDialog(QDialog):
         # Role
         self.role_label = QLabel("Role:")
         self.role_combo = QComboBox()
-        self.role_combo.addItems(["employee", "technician"])
+        self.role_combo.addItems(["employee", "technician","ga"])
         layout.addWidget(self.role_label)
         layout.addWidget(self.role_combo)
 
