@@ -12,17 +12,17 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QListWidget, QTextEdit,
     QScrollArea, QFrame, QSizePolicy, QListWidgetItem, QGraphicsDropShadowEffect,
-    QFileDialog, QMessageBox, QComboBox, QDialog, QSpacerItem, QSizePolicy, QToolButton, QMenu, QStyle
+    QFileDialog, QMessageBox, QComboBox, QDialog, QCheckBox, QSpacerItem, QSizePolicy, QToolButton, QMenu, QStyle
 )
 from PyQt5.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply # Untuk memuat gambar secara asinkron
-from PyQt5.QtCore import pyqtSignal, Qt, QTimer, QUrl, QMimeData, QDir, QStandardPaths
+from PyQt5.QtCore import QSettings, pyqtSignal, Qt, QTimer, QUrl, QMimeData, QDir, QStandardPaths
 from PyQt5.QtGui import QColor,QKeyEvent, QFont, QPainter, QBrush, QPalette, QPixmap, QIcon, QDesktopServices, QImage
 
 
 # Suppress font warnings
 os.environ['QT_LOGGING_RULES'] = 'qt.qpa.fonts=false'
 
-IP = "192.168.79.125"
+IP = "192.168.47.190"
 # IP = "192.168.1.7"
 PORT = "5000"
 
@@ -587,7 +587,7 @@ class ChatWindow(QWidget):
                     background-color: #28A745; /* Warna hijau yang berbeda */
                     color: white; border: none;
                     padding: 10px; border-radius: 18px; font-size: 13px;
-                    font-weight: 500; margin: 5px 20px;
+                    font-weight: 500; margin: 17px 20px;
                 }
                 QPushButton:hover { background-color: #218838; }
                 QPushButton:pressed { background-color: #1E7E34; }
@@ -2034,11 +2034,17 @@ class AddUserDialog(QDialog):
 class LoginWindow(QWidget):
     def __init__(self):
         super().__init__()
+        
+        self.settings = QSettings("MyCompany", "ITChat") 
+        self.saved_accounts = [] # Untuk menyimpan daftar akun yang dimuat
         self.setup_ui()
+        self.load_saved_accounts_to_combo() # Muat login yang tersimpan
     
     def setup_ui(self):
         self.setWindowTitle("Login - IT Chat")
-        self.setFixedSize(480, 740)
+        # self.setFixedSize(480, 800)
+        self.resize(480, 750)
+        
         
         # Main container
         main_layout = QVBoxLayout()
@@ -2099,6 +2105,103 @@ class LoginWindow(QWidget):
         form_layout = QVBoxLayout()
         form_layout.setContentsMargins(40, 20, 20, 20)
         form_layout.setSpacing(10)
+        
+        saved_accounts_header_layout = QHBoxLayout()
+        saved_accounts_label = QLabel("Saved Accounts:")
+        saved_accounts_label.setStyleSheet("font-size: 13px; color: #555; margin-bottom: 0px;")
+        form_layout.addWidget(saved_accounts_label)
+        
+        saved_accounts_header_layout.addWidget(saved_accounts_label)
+        saved_accounts_header_layout.addStretch() # Dorong tombol clear ke kanan
+
+        self.clear_cache_button = QPushButton("Clear") # Bisa juga "Clear All" atau ikon
+        self.clear_cache_button.setStyleSheet("""
+            QPushButton {
+                font-size: 11px; color: #E74C3C; /* Merah */
+                background-color: transparent;
+                border: 1px solid #E74C3C;
+                border-radius: 4px;
+                padding: 3px 8px;
+                margin-left: 5px; /* Jarak dari label jika tidak ada stretch */
+            }
+            QPushButton:hover { background-color: #FADBD8; /* Merah muda saat hover */ }
+            QPushButton:pressed { background-color: #F5B7B1; }
+        """)
+        self.clear_cache_button.setToolTip("Clear all saved login accounts")
+        self.clear_cache_button.clicked.connect(self.clear_saved_accounts)
+        saved_accounts_header_layout.addWidget(self.clear_cache_button)
+        
+        form_layout.addLayout(saved_accounts_header_layout) # Tambahkan layout horizontal ini
+
+        self.accounts_combo = QComboBox()
+        self.accounts_combo.setStyleSheet("""
+            QComboBox {
+                padding: 12px; 
+                font-size: 14px; 
+                border: 1px solid #E0E0E0;
+                border-radius: 8px; 
+                background-color: #FDFDFD;
+                /* Gaya untuk teks di kotak QComboBox utama saat item dipilih & dropdown tertutup */
+                selection-background-color: #e6efff; /* Warna latar pilihan di kotak utama */
+                selection-color: #333; /* Warna teks pilihan di kotak utama */
+            }
+            QComboBox::drop-down { 
+                border: none; 
+                /* Jika Anda ingin custom drop-down arrow, bisa diatur di sini */
+                /* subcontrol-origin: padding; */
+                /* subcontrol-position: top right; */
+                /* width: 20px; */
+                /* border-left-width: 1px; */
+                /* border-left-color: darkgray; */
+                /* border-left-style: solid; */
+                /* border-top-right-radius: 3px; */
+                /* border-bottom-right-radius: 3px; */
+            }
+            QComboBox::down-arrow { 
+                /* image: url(path/to/your/custom_arrow.png); */ /* Ganti dengan path ikon panah custom jika ada */
+                /* Jika ingin panah default tapi dengan style berbeda, atau panah kecil, bisa lebih kompleks */
+                /* Untuk menyembunyikan sepenuhnya: */
+                image: url(none); 
+            }
+
+            /* Ini untuk tampilan dropdown list (popup) */
+            QComboBox QAbstractItemView {
+                background-color: white; /* Latar belakang dropdown list */
+                border: 1px solid #D0D0D0; /* Border untuk dropdown list */
+                border-radius: 4px;
+                selection-background-color: transparent; /* PENTING: membuat seleksi default view transparan */
+                                                        /* agar style item:selected kita yang dominan */
+                outline: 0px; /* Menghilangkan outline fokus (jika ada) */
+            }
+
+            /* Ini untuk setiap item di dalam dropdown list */
+            QComboBox QAbstractItemView::item {
+                padding: 8px 12px; /* Padding untuk setiap item */
+                color: #333; /* Warna teks item default */
+                background-color: white; /* Latar belakang item default */
+            }
+
+            /* Item saat di-hover mouse di dropdown list */
+            QComboBox QAbstractItemView::item:hover {
+                background-color: #f0f5ff; /* Warna latar saat hover, misal biru muda */
+                color: #000; /* Warna teks saat hover */
+            }
+
+            /* Item yang DIPILIH di dalam dropdown list */
+            QComboBox QAbstractItemView::item:selected {
+                background-color: #cce0ff; /* Warna latar untuk item terpilih, misal biru lebih gelap */
+                                        /* Jika ingin benar-benar transparan: background-color: transparent; */
+                color: #000000; /* Warna teks untuk item terpilih */
+                /* Jika background-color: transparent;, Anda mungkin ingin warna teks yang berbeda, contoh: */
+                /* color: #0052cc; */ /* Biru tua untuk teks jika latar transparan */
+            }
+        """)
+        self.accounts_combo.currentIndexChanged.connect(self.on_account_selected_from_combo)
+        form_layout.addWidget(self.accounts_combo)
+        # --- End Saved Accounts ComboBox ---
+        
+        
+        
         
         # Welcome text
         welcome_label = QLabel("Welcome back!")
@@ -2181,6 +2284,13 @@ class LoginWindow(QWidget):
         """)
         form_layout.addWidget(self.password_input)
         
+                # --- Remember Me Checkbox ---
+        self.remember_me_checkbox = QCheckBox("Remember me")
+        self.remember_me_checkbox.setStyleSheet("font-size: 14px; color: #333; padding-top: 5px;")
+        self.remember_me_checkbox.setChecked(True) # Defaultnya tercentang
+        form_layout.addWidget(self.remember_me_checkbox)
+        # --- End Remember Me Checkbox ---
+        
         # Login button
         login_btn = QPushButton("Sign In")
         login_btn.clicked.connect(self.handle_login)
@@ -2249,34 +2359,144 @@ class LoginWindow(QWidget):
             }
         """)
     
+    def load_saved_accounts_to_combo(self):
+        self.accounts_combo.blockSignals(True) # Blokir sinyal agar tidak trigger saat mengisi
+        self.accounts_combo.clear()
+        self.accounts_combo.addItem("-- Select a saved account --", userData=None) # Placeholder
+
+        # Muat dari QSettings, default ke list kosong jika tidak ada
+        self.saved_accounts = self.settings.value("saved_it_accounts", []) 
+        
+        # Pastikan self.saved_accounts adalah list (jika QSettings mengembalikan None atau tipe lain)
+        if not isinstance(self.saved_accounts, list):
+            self.saved_accounts = []
+
+        for account in self.saved_accounts:
+            if isinstance(account, dict) and "username" in account:
+                 # Simpan seluruh objek akun di userData untuk akses mudah nanti
+                self.accounts_combo.addItem(account["username"], userData=account)
+        
+        self.accounts_combo.blockSignals(False) # Aktifkan kembali sinyal
+
+    def on_account_selected_from_combo(self, index):
+        if index <= 0: # Jika placeholder "-- Select a saved account --" yang dipilih
+            self.username_input.clear()
+            self.password_input.clear()
+            return
+
+        selected_account_data = self.accounts_combo.itemData(index) # Ambil data dari userData
+        if selected_account_data and isinstance(selected_account_data, dict):
+            self.username_input.setText(selected_account_data.get("username", ""))
+            # PERINGATAN: Password disimpan sebagai plain text di QSettings!
+            self.password_input.setText(selected_account_data.get("password", ""))
+    
+    # def handle_login(self):
+    #     username = self.username_input.text()
+    #     password = self.password_input.text()
+        
+    #     if not username or not password:
+    #         self.show_error("Username and password are required")
+    #         return
+        
+    #     data = {
+    #         'username': username,
+    #         'password': password
+    #     }
+        
+    #     try:
+    #         response = requests.post(f"{BASE_URL}/login_it", json=data)
+    #         if response.status_code == 200:
+    #             result = response.json()
+    #             if result['success']:
+    #                 self.chat_window = ChatWindow(result['user'])
+    #                 self.chat_window.show()
+    #                 self.close()
+    #             else:
+    #                 self.show_error("Invalid username or password. Please try again.")
+    #         else:
+    #             self.show_error("Server error occurred. Please try again later.")
+    #     except requests.exceptions.ConnectionError:
+    #         self.show_error("Cannot connect to server. Please check your connection.")
+    
     def handle_login(self):
+        print("DEBUG: handle_login called") # DEBUG
         username = self.username_input.text()
         password = self.password_input.text()
         
         if not username or not password:
+            print(f"DEBUG: Username entered: {username}") # DEBUG
+            print(f"DEBUG: Password entered: {password}") # DEBUG
             self.show_error("Username and password are required")
             return
         
-        data = {
-            'username': username,
-            'password': password
-        }
+        data = {'username': username, 'password': password} # Password dikirim ke server untuk di-hash & dicek
         
         try:
-            response = requests.post(f"{BASE_URL}/login_it", json=data)
+            response = requests.post(f"{BASE_URL}/login_it", json=data) # Endpoint login IT
             if response.status_code == 200:
                 result = response.json()
                 if result['success']:
+                    # Jika login berhasil dan "Remember me" dicentang
                     self.chat_window = ChatWindow(result['user'])
-                    self.chat_window.show()
+                    
+                    print(f"DEBUG: Login successful for user {username}. User data: {result['user']}") # DEBUG
+                    if self.remember_me_checkbox.isChecked():
+                        print(f"DEBUG: Saving account {username} to settings.") # DEBUG
+                        self.save_account_to_settings(username, password)
+                    self.chat_window.show()# Simpan password ASLI yang diketik pengguna
                     self.close()
+                    
                 else:
-                    self.show_error("Invalid username or password. Please try again.")
+                    self.show_error(result.get('message', "Invalid username or password."))
             else:
-                self.show_error("Server error occurred. Please try again later.")
+                self.show_error(f"Server error: {response.status_code}. Please try again later.")
         except requests.exceptions.ConnectionError:
             self.show_error("Cannot connect to server. Please check your connection.")
-    
+        except Exception as e:
+            self.show_error(f"An unexpected error occurred: {str(e)}")
+            
+    def save_account_to_settings(self, username, password_to_save):
+        # PERINGATAN: Menyimpan password seperti ini tidak aman.
+        # Ini hanya untuk kemudahan lokal dan demo.
+        
+        # Muat akun yang sudah ada
+        current_saved_accounts = self.settings.value("saved_it_accounts", [])
+        if not isinstance(current_saved_accounts, list): # Pastikan itu list
+            current_saved_accounts = []
+
+        account_exists = False
+        for acc in current_saved_accounts:
+            if isinstance(acc, dict) and acc.get("username") == username:
+                acc["password"] = password_to_save # Update password jika username sudah ada
+                account_exists = True
+                break
+        
+        if not account_exists:
+            current_saved_accounts.append({"username": username, "password": password_to_save})
+        
+        # Batasi jumlah akun yang disimpan (misalnya 5 terakhir)
+        max_saved_accounts = 5 
+        if len(current_saved_accounts) > max_saved_accounts:
+            current_saved_accounts = current_saved_accounts[-max_saved_accounts:]
+
+        self.settings.setValue("saved_it_accounts", current_saved_accounts)
+        self.settings.sync() # Pastikan data ditulis ke penyimpanan
+        
+        # Muat ulang ComboBox untuk menampilkan perubahan (jika ada)
+        self.load_saved_accounts_to_combo()
+        
+    def clear_saved_accounts(self):
+        reply = QMessageBox.question(self, "Clear Saved Accounts",
+                                    "Are you sure you want to clear all saved accounts?",
+                                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            self.settings.remove("saved_it_accounts") # Hapus key dari settings
+            self.settings.sync() # Pastikan perubahan ditulis
+            self.load_saved_accounts_to_combo() # Muat ulang ComboBox (akan jadi kosong)
+            self.username_input.clear()
+            self.password_input.clear()
+            QMessageBox.information(self, "Cleared", "Saved accounts have been cleared.")
+        
     def show_error(self, message):
         self.error_label.setText(f"⚠️ {message}")
         self.error_label.show()
