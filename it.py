@@ -16,7 +16,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply # Untuk memuat gambar secara asinkron
 from PyQt5.QtCore import pyqtSignal, Qt, QTimer, QUrl, QMimeData, QDir, QStandardPaths
-from PyQt5.QtGui import QColor, QFont, QPainter, QBrush, QPalette, QPixmap, QIcon, QDesktopServices, QImage
+from PyQt5.QtGui import QColor,QKeyEvent, QFont, QPainter, QBrush, QPalette, QPixmap, QIcon, QDesktopServices, QImage
 
 
 # Suppress font warnings
@@ -41,6 +41,30 @@ class FilePasteTextEdit(QTextEdit):
         super().__init__(*args, **kwargs)
         self.parent_chat_window = parent_chat_window
         self.setAcceptRichText(True)
+        
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        # Qt.Key_Return adalah tombol Enter utama
+        # Qt.Key_Enter adalah tombol Enter di numpad
+        # event.modifiers() mengembalikan kombinasi modifier (Shift, Ctrl, Alt, dll.)
+        
+        # Cek apakah tombol Enter ditekan DAN modifier Alt aktif
+        is_enter_key = (event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter)
+        alt_is_pressed = bool(event.modifiers() & Qt.AltModifier) # Cara aman mengecek flag Alt
+
+        if is_enter_key and alt_is_pressed:
+            # Jika Alt + Enter terdeteksi
+            if hasattr(self.parent_chat_window, 'send_message'):
+                print("DEBUG: Alt+Enter pressed, calling send_message.") # Debugging
+                self.parent_chat_window.send_message()
+                event.accept()  # Tandai event sudah ditangani, jangan proses lebih lanjut (mis. jangan buat baris baru)
+                return          # Keluar dari fungsi setelah menangani
+            else:
+                # Fallback jika karena suatu alasan send_message tidak ada
+                super().keyPressEvent(event)
+        else:
+            # Jika bukan Alt+Enter, biarkan QTextEdit menangani event seperti biasa
+            # (misalnya, Enter biasa akan membuat baris baru, ketikan lain akan muncul, dll.)
+            super().keyPressEvent(event)
 
     def canInsertFromMimeData(self, source: QMimeData) -> bool:
         return source.hasUrls() or source.hasImage() or super().canInsertFromMimeData(source)
@@ -781,7 +805,7 @@ class ChatWindow(QWidget):
         
         # Message input area
         input_area = QWidget()
-        input_area.setFixedHeight(80)
+        # input_area.setFixedHeight(80)
         # input_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)  
         input_area.setStyleSheet("""
             QWidget {
@@ -815,7 +839,7 @@ class ChatWindow(QWidget):
         # self.message_input = QTextEdit()
         self.message_input = FilePasteTextEdit(self)
         # self.message_input.setMaximumHeight(48)
-        self.message_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.message_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.message_input.setPlaceholderText("Add a comment or paste a file...")
         self.message_input.setStyleSheet("""
             QTextEdit {
@@ -868,7 +892,7 @@ class ChatWindow(QWidget):
             }
         """)
     
-    
+
     def filter_conversations(self, text):
         search_text = text.lower().strip() # Teks pencarian, lowercase, dan hapus spasi di awal/akhir
 
@@ -1444,8 +1468,22 @@ class ChatWindow(QWidget):
         # 5. (Opsional) Hapus sorotan dari QListWidget jika ada
         if self.conversation_list.currentItem():
             self.conversation_list.currentItem().setSelected(False)
-            self.conversation_list.setCurrentItem(None) # Ini penting untuk menghapus fokus    
-            
+            self.conversation_list.setCurrentItem(None) # Ini penting untuk menghapus fokus   
+             
+    def keyPressEvent(self, event: QKeyEvent):
+        """Menangani event tombol keyboard yang ditekan."""
+        if event.key() == Qt.Key_Escape:
+            # Hanya jalankan fungsi kembali jika tombol back sed    ang terlihat
+            # (artinya, pengguna sedang dalam tampilan percakapan)
+            if self.back_button.isVisible():
+                self.go_back_to_selection_view()
+                event.accept()  # Menandakan bahwa event ini sudah ditangani
+                return
+
+        # Jika bukan tombol Escape atau tombol back tidak visible,
+        # teruskan event ke handler default kelas induk.
+        super().keyPressEvent(event)         
+        
     def load_messages(self, conversation_id, scroll_to_bottom=False):
         print(f"DEBUG: ChatWindow - Memuat pesan untuk conv_id: {conversation_id}") # DEBUG
         try:

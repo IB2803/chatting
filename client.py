@@ -631,7 +631,7 @@ class ChatWindow(QWidget):
         
         # Message input area
         input_area = QWidget()
-        input_area.setFixedHeight(80)
+        # input_area.setFixedHeight(80)
         input_area.setStyleSheet("""
             QWidget {
                 background-color: #FFFFFF;
@@ -663,8 +663,9 @@ class ChatWindow(QWidget):
         # Message input
         self.message_input = QTextEdit()
         self.message_input = FilePasteTextEdit(self)
-        self.message_input.setMaximumHeight(48)
-        self.message_input.setPlaceholderText("Add a comment...")
+        # self.message_input.setMaximumHeight(48)
+        self.message_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.message_input.setPlaceholderText("Add a comment or paste a file...")
         self.message_input.setStyleSheet("""
             QTextEdit {
                 background-color: #F1F3F4;
