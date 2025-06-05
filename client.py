@@ -11,17 +11,17 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QListWidget, QTextEdit,
     QScrollArea, QFrame, QSizePolicy, QListWidgetItem, QGraphicsDropShadowEffect,
-    QFileDialog, QMessageBox
+    QFileDialog, QMessageBox, QComboBox, QCheckBox
 )
 from PyQt5.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply # Untuk memuat gambar secara asinkron
-from PyQt5.QtCore import pyqtSignal, Qt, QTimer, QUrl, QMimeData, QDir, QStandardPaths
+from PyQt5.QtCore import pyqtSignal, Qt, QTimer, QUrl, QMimeData, QDir, QStandardPaths, QSettings
 from PyQt5.QtGui import QColor, QFont, QPainter, QBrush, QPalette, QPixmap, QIcon, QDesktopServices, QImage
 
 
 # Suppress font warnings
 os.environ['QT_LOGGING_RULES'] = 'qt.qpa.fonts=false'
 
-IP = "192.168.45.171" 
+IP = "192.168.47.190" 
 # IP = "192.168.1.7" 
 PORT = "5000"
 
@@ -198,8 +198,12 @@ class BubbleMessage(QLabel):
         self.setWordWrap(True)
         self.setMargin(15)
         self.setTextFormat(Qt.RichText)
+        
+        import html
+        processed_text = html.escape(text) # Pertama, escape HTML entities seperti <, >, &
+        display_text = processed_text.replace('\n', '<br>')
 
-        display_text = text # Server sudah mengirim format [File: namafile.ext]
+        # display_text = text # Server sudah mengirim format [File: namafile.ext]
 
         # Tambahkan sedikit style jika ini adalah file untuk membuatnya terlihat seperti link
         if self.filename_to_download and text.startswith("[File:"):
@@ -377,7 +381,7 @@ class ChatWindow(QWidget):
         
     
     def setup_ui(self):
-        self.setWindowTitle(f"IT Support Chat - {self.user['full_name']} ({self.user['role'].title()})")
+        self.setWindowTitle(f"IT Chat - {self.user['full_name']} ({self.user['role'].title()})")
         self.resize(600, 700)
         # self.setFixedSize(600, 900)
         
@@ -627,7 +631,7 @@ class ChatWindow(QWidget):
         
         # Message input area
         input_area = QWidget()
-        input_area.setFixedHeight(80)
+        # input_area.setFixedHeight(80)
         input_area.setStyleSheet("""
             QWidget {
                 background-color: #FFFFFF;
@@ -659,8 +663,9 @@ class ChatWindow(QWidget):
         # Message input
         self.message_input = QTextEdit()
         self.message_input = FilePasteTextEdit(self)
-        self.message_input.setMaximumHeight(48)
-        self.message_input.setPlaceholderText("Add a comment...")
+        # self.message_input.setMaximumHeight(48)
+        self.message_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.message_input.setPlaceholderText("Add a comment or paste a file...")
         self.message_input.setStyleSheet("""
             QTextEdit {
                 background-color: #F1F3F4;
@@ -1044,21 +1049,49 @@ class ChatWindow(QWidget):
             self.load_conversations()
     
     def closeEvent(self, event):
-        print("DEBUG: ChatWindow - Menutup ChatWindow, menghentikan WebSocket thread.")
+        print("DEBUG: ChatWindow - closeEvent triggered. Returning to LoginWindow.")
+
+        # 1. Hentikan WebSocketThread
         if hasattr(self, 'ws_thread') and self.ws_thread.is_alive():
-            self.ws_thread.stop()  # Panggil metode stop dari WebSocketThread yang baru
+            print("DEBUG: ChatWindow - Stopping WebSocket thread...")
+            self.ws_thread.stop()  # Panggil metode stop dari WebSocketThread
             self.ws_thread.join(timeout=2) # Tunggu thread selesai (opsional, dengan timeout)
-        super().closeEvent(event)
+            if self.ws_thread.is_alive():
+                print("DEBUG: ChatWindow - WebSocket thread did not stop in time.")
+            else:
+                print("DEBUG: ChatWindow - WebSocket thread stopped.")
+        else:
+            print("DEBUG: ChatWindow - WebSocket thread not found or not alive.")
+
+        # 2. Buat dan tampilkan instance baru dari LoginWindow
+        # Kita akan membuat atribut sementara untuk LoginWindow baru agar tidak langsung di-garbage collect
+        # sebelum sempat ditampilkan, meskipun .show() biasanya cukup.
+        print("DEBUG: ChatWindow - Re-instantiating and showing LoginWindow.")
+        self._login_window_after_close = LoginWindow() # Buat instance baru
+        self._login_window_after_close.show()
+
+        # 3. Terima event close untuk ChatWindow ini agar benar-benar ditutup dan dihancurkan.
+        # Karena LoginWindow baru sudah ditampilkan, aplikasi tidak akan keluar
+        # (jika QApplication.quitOnLastWindowClosed() adalah default True).
+        print("DEBUG: ChatWindow - Accepting close event to close and destroy current ChatWindow.")
+        event.accept()
+        # super().closeEvent(event) # bisa juga digunakan sebagai alternatif event.accept()
+                                 # jika ada logika closeEvent di parent class QWidget yang ingin dijalankan.
+                                 # Untuk kasus umum, event.accept() cukup.
         
 class LoginWindow(QWidget):
     def __init__(self):
         super().__init__()
+        
+        self.settings = QSettings("MyCompany", "ITChat") 
+        self.saved_accounts = [] 
         self.setup_ui()
+        self.load_saved_accounts_to_combo()
     
     def setup_ui(self):
-        self.setWindowTitle("Login - IT Support Chat")
-        self.setFixedSize(480, 650)
-        
+        self.setWindowTitle("Login - IT Chat")
+        # self.setFixedSize(480, 650)
+        self.resize(480, 650)
         # Main container
         main_layout = QVBoxLayout()
         main_layout.setContentsMargins(0, 0, 0, 0)
@@ -1085,7 +1118,7 @@ class LoginWindow(QWidget):
         top_layout.addWidget(logo_label)
         
         # Title
-        title = QLabel("IT Support Chat")
+        title = QLabel("IT Chat")
         title.setStyleSheet("""
             QLabel {
                 font-size: 28px; 
@@ -1119,6 +1152,44 @@ class LoginWindow(QWidget):
         form_layout.setContentsMargins(40, 40, 40, 40)
         form_layout.setSpacing(24)
         
+        # --- Saved Accounts ComboBox & Clear Button ---
+        saved_accounts_header_layout = QHBoxLayout()
+        saved_accounts_label = QLabel("Saved NIK/Usernames:") # Sesuaikan label
+        saved_accounts_label.setStyleSheet("font-size: 13px; color: #555; margin-bottom: 0px;")
+        saved_accounts_header_layout.addWidget(saved_accounts_label)
+        saved_accounts_header_layout.addStretch()
+
+        self.clear_cache_button = QPushButton("Clear")
+        self.clear_cache_button.setStyleSheet("""
+            QPushButton { font-size: 11px; color: #E74C3C; background-color: transparent;
+                          border: 1px solid #E74C3C; border-radius: 4px; padding: 3px 8px; }
+            QPushButton:hover { background-color: #FADBD8; }
+            QPushButton:pressed { background-color: #F5B7B1; }
+        """)
+        self.clear_cache_button.setToolTip("Clear all saved NIK/Usernames")
+        self.clear_cache_button.clicked.connect(self.clear_saved_accounts)
+        saved_accounts_header_layout.addWidget(self.clear_cache_button)
+        form_layout.addLayout(saved_accounts_header_layout)
+
+        self.accounts_combo = QComboBox()
+        # Stylesheet accounts_combo sama seperti di it.py
+        self.accounts_combo.setStyleSheet("""
+            QComboBox { padding: 12px; font-size: 14px; border: 1px solid #E0E0E0;
+                        border-radius: 8px; background-color: #FDFDFD;
+                        selection-background-color: #e6efff; selection-color: #333; }
+            QComboBox::drop-down { border: none; }
+            QComboBox::down-arrow { image: url(none); }
+            QComboBox QAbstractItemView { background-color: white; border: 1px solid #D0D0D0; border-radius: 4px;
+                                        selection-background-color: transparent; outline: 0px; }
+            QComboBox QAbstractItemView::item { padding: 8px 12px; color: #333; background-color: white; }
+            QComboBox QAbstractItemView::item:hover { background-color: #f0f5ff; color: #000; }
+            QComboBox QAbstractItemView::item:selected { background-color: #cce0ff; color: #000000; }
+        """)
+        self.accounts_combo.currentIndexChanged.connect(self.on_account_selected_from_combo)
+        form_layout.addWidget(self.accounts_combo)
+        # --- End Saved Accounts ComboBox & Clear Button ---
+        
+        
         # Welcome text
         # welcome_label = QLabel("Welcome back!")
         # welcome_label.setStyleSheet("""
@@ -1130,6 +1201,11 @@ class LoginWindow(QWidget):
         #     }
         # """)
         # form_layout.addWidget(welcome_label)
+        # --- Remember Me Checkbox (atau "Remember NIK") ---
+        self.remember_me_checkbox = QCheckBox("Remember NIK") # Sesuaikan teks
+        self.remember_me_checkbox.setStyleSheet("font-size: 14px; color: #333; padding-top: 5px;")
+        self.remember_me_checkbox.setChecked(True)
+        form_layout.addWidget(self.remember_me_checkbox)
         
         welcome_sub = QLabel("Please sign in to your account")
         welcome_sub.setStyleSheet("""
@@ -1267,34 +1343,126 @@ class LoginWindow(QWidget):
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             }
         """)
-    
-    def handle_login(self):
-        username = self.username_input.text()
-        # password = self.password_input.text()
+    def load_saved_accounts_to_combo(self):
+        self.accounts_combo.blockSignals(True)
+        self.accounts_combo.clear()
+        self.accounts_combo.addItem("-- Select a saved NIK --", userData=None) # Placeholder
+
+        self.saved_accounts = self.settings.value("saved_client_accounts", []) # Key berbeda untuk client
+        if not isinstance(self.saved_accounts, list):
+            self.saved_accounts = []
+
+        for account in self.saved_accounts:
+            # Di client, kita hanya menyimpan username (NIK)
+            if isinstance(account, dict) and "username" in account:
+                self.accounts_combo.addItem(account["username"], userData=account)
         
-        if not username :
-            self.show_error("Username and password are required")
+        self.accounts_combo.blockSignals(False)
+        self.clear_cache_button.setVisible(self.accounts_combo.count() > 1)
+
+
+    def on_account_selected_from_combo(self, index):
+        if index <= 0: 
+            # self.username_input.clear() # Opsional, agar tidak mengganggu jika pengguna mau ketik manual
+            return
+
+        selected_account_data = self.accounts_combo.itemData(index)
+        if selected_account_data and isinstance(selected_account_data, dict):
+            self.username_input.setText(selected_account_data.get("username", ""))
+            # Tidak ada field password di UI login client ini, jadi tidak perlu diisi
+
+
+    def handle_login(self):
+        username = self.username_input.text() # Ini adalah NIK
+        
+        if not username: # Hanya NIK yang diperlukan untuk login client
+            self.show_error("NIK is required")
             return
         
-        data = {
-            'username': username,
-            # 'password': password
-        }
+        data_to_server = {'username': username} # Data yang dikirim ke server
         
         try:
-            response = requests.post(f"{BASE_URL}/login", json=data)
+            response = requests.post(f"{BASE_URL}/login", json=data_to_server) # Endpoint login client
             if response.status_code == 200:
                 result = response.json()
                 if result['success']:
-                    self.chat_window = ChatWindow(result['user'])
+                    if self.remember_me_checkbox.isChecked():
+                        self.save_account_to_settings(username) # Simpan NIK
+
+                    self.chat_window = ChatWindow(result['user']) # ChatWindow sudah terdefinisi di client.py
                     self.chat_window.show()
                     self.close()
                 else:
-                    self.show_error("Invalid username or password. Please try again.")
+                    self.show_error(result.get('message', "Invalid NIK."))
             else:
-                self.show_error("Server error occurred. Please try again later.")
+                self.show_error(f"Server error: {response.status_code}. Please try again later.")
         except requests.exceptions.ConnectionError:
             self.show_error("Cannot connect to server. Please check your connection.")
+        except Exception as e:
+            self.show_error(f"An unexpected error occurred: {str(e)}")
+
+
+    def save_account_to_settings(self, username_to_save): # Hanya menerima username (NIK)
+        current_saved_accounts = self.settings.value("saved_client_accounts", []) # Key berbeda
+        if not isinstance(current_saved_accounts, list):
+            current_saved_accounts = []
+
+        account_exists = False
+        for acc in current_saved_accounts:
+            if isinstance(acc, dict) and acc.get("username") == username_to_save:
+                account_exists = True
+                break 
+        
+        if not account_exists:
+            # Hanya simpan username karena tidak ada input password
+            current_saved_accounts.append({"username": username_to_save}) 
+        
+        max_saved_accounts = 5 
+        if len(current_saved_accounts) > max_saved_accounts:
+            current_saved_accounts = current_saved_accounts[-max_saved_accounts:]
+
+        self.settings.setValue("saved_client_accounts", current_saved_accounts)
+        self.settings.sync()
+        self.load_saved_accounts_to_combo()
+
+
+    def clear_saved_accounts(self):
+        reply = QMessageBox.question(self, "Clear Saved NIKs",
+                                     "Are you sure you want to clear all saved NIKs?",
+                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            self.settings.remove("saved_client_accounts") # Key berbeda
+            self.settings.sync()
+            self.load_saved_accounts_to_combo()
+            self.username_input.clear()
+            QMessageBox.information(self, "Cleared", "Saved NIKs have been cleared.")
+    # def handle_login(self):
+    #     username = self.username_input.text()
+    #     # password = self.password_input.text()
+        
+    #     if not username :
+    #         self.show_error("Username and password are required")
+    #         return
+        
+    #     data = {
+    #         'username': username,
+    #         # 'password': password
+    #     }
+        
+    #     try:
+    #         response = requests.post(f"{BASE_URL}/login", json=data)
+    #         if response.status_code == 200:
+    #             result = response.json()
+    #             if result['success']:
+    #                 self.chat_window = ChatWindow(result['user'])
+    #                 self.chat_window.show()
+    #                 self.close()
+    #             else:
+    #                 self.show_error("Invalid username or password. Please try again.")
+    #         else:
+    #             self.show_error("Server error occurred. Please try again later.")
+    #     except requests.exceptions.ConnectionError:
+    #         self.show_error("Cannot connect to server. Please check your connection.")
     
     def show_error(self, message):
         self.error_label.setText(f"⚠️ {message}")

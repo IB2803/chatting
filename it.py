@@ -12,17 +12,17 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QListWidget, QTextEdit,
     QScrollArea, QFrame, QSizePolicy, QListWidgetItem, QGraphicsDropShadowEffect,
-    QFileDialog, QMessageBox, QComboBox, QDialog, QSpacerItem, QSizePolicy, QToolButton, QMenu, QStyle
+    QFileDialog, QMessageBox, QComboBox, QDialog, QCheckBox, QSpacerItem, QSizePolicy, QToolButton, QMenu, QStyle
 )
 from PyQt5.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply # Untuk memuat gambar secara asinkron
-from PyQt5.QtCore import pyqtSignal, Qt, QTimer, QUrl, QMimeData, QDir, QStandardPaths
-from PyQt5.QtGui import QColor, QFont, QPainter, QBrush, QPalette, QPixmap, QIcon, QDesktopServices, QImage
+from PyQt5.QtCore import QSettings, pyqtSignal, Qt, QTimer, QUrl, QMimeData, QDir, QStandardPaths
+from PyQt5.QtGui import QColor,QKeyEvent, QFont, QPainter, QBrush, QPalette, QPixmap, QIcon, QDesktopServices, QImage
 
 
 # Suppress font warnings
 os.environ['QT_LOGGING_RULES'] = 'qt.qpa.fonts=false'
 
-IP = "192.168.45.171"
+IP = "192.168.47.190"
 # IP = "192.168.1.7"
 PORT = "5000"
 
@@ -41,6 +41,30 @@ class FilePasteTextEdit(QTextEdit):
         super().__init__(*args, **kwargs)
         self.parent_chat_window = parent_chat_window
         self.setAcceptRichText(True)
+        
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        # Qt.Key_Return adalah tombol Enter utama
+        # Qt.Key_Enter adalah tombol Enter di numpad
+        # event.modifiers() mengembalikan kombinasi modifier (Shift, Ctrl, Alt, dll.)
+        
+        # Cek apakah tombol Enter ditekan DAN modifier Alt aktif
+        is_enter_key = (event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter)
+        alt_is_pressed = bool(event.modifiers() & Qt.AltModifier) # Cara aman mengecek flag Alt
+
+        if is_enter_key and alt_is_pressed:
+            # Jika Alt + Enter terdeteksi
+            if hasattr(self.parent_chat_window, 'send_message'):
+                print("DEBUG: Alt+Enter pressed, calling send_message.") # Debugging
+                self.parent_chat_window.send_message()
+                event.accept()  # Tandai event sudah ditangani, jangan proses lebih lanjut (mis. jangan buat baris baru)
+                return          # Keluar dari fungsi setelah menangani
+            else:
+                # Fallback jika karena suatu alasan send_message tidak ada
+                super().keyPressEvent(event)
+        else:
+            # Jika bukan Alt+Enter, biarkan QTextEdit menangani event seperti biasa
+            # (misalnya, Enter biasa akan membuat baris baru, ketikan lain akan muncul, dll.)
+            super().keyPressEvent(event)
 
     def canInsertFromMimeData(self, source: QMimeData) -> bool:
         return source.hasUrls() or source.hasImage() or super().canInsertFromMimeData(source)
@@ -118,6 +142,13 @@ class WebSocketThread(threading.Thread):
         
     def setup_event_handlers(self):
         # Handler untuk event koneksi berhasil
+        @self.sio.on('conversation_created') # Event baru dari server
+        def on_conversation_created(data):
+            print(f"DEBUG: WebSocketThread (python-socketio) - Menerima 'conversation_created': {data}")
+            # Emit sinyal ke ChatWindow dengan payload ini.
+            # ChatWindow akan membutuhkan metode baru untuk menangani ini.
+            self.chat_window.new_conversation_signal.emit(data) # Buat sinyal baru
+
         @self.sio.event
         def connect():
             print("DEBUG: WebSocketThread (python-socketio) - Terhubung ke server Socket.IO!")
@@ -348,7 +379,7 @@ class ConversationItem(QWidget):
 
 class ChatWindow(QWidget):
     receive_message_signal = pyqtSignal(dict)
-    
+    new_conversation_signal = pyqtSignal(dict)
     def __init__(self, user, parent=None):
         super().__init__(parent)
         self.user = user
@@ -359,6 +390,9 @@ class ChatWindow(QWidget):
         if not self.current_conversation:
             self.chat_options_button.hide()
         self.load_conversations() # Panggil setelah setup_ui
+        
+        
+        
         
             # --- INISIALISASI SUARA NOTIFIKASI ---
         self.message_sound = QSoundEffect(self) # 'self' sebagai parent
@@ -379,6 +413,8 @@ class ChatWindow(QWidget):
         else:
             print(f"WARNING: Sound file not found at '{sound_file_path}'. Sound notifications will be disabled.")
             self.message_sound = None # Nonaktifkan jika file tidak ditemukan
+            
+        self.new_conversation_signal.connect(self.handle_new_conversation_added) # Handler baru
         # --- AKHIR INISIALISASI SUARA ---
         # Timer untuk refresh
         self.timer = QTimer(self)
@@ -401,7 +437,7 @@ class ChatWindow(QWidget):
 
         
     def setup_ui(self):
-        self.setWindowTitle(f"IT Support Chat - {self.user['full_name']} ({self.user['role'].title()})")
+        self.setWindowTitle(f"IT Chat - {self.user['full_name']} ({self.user['role'].title()})")
         self.resize(1200, 800)
         
         # Main layout
@@ -517,34 +553,47 @@ class ChatWindow(QWidget):
         
         # Tombol "Add User" (jika hanya untuk technician/admin)
         if self.user['role'] == 'technician': # Misal hanya teknisi yang bisa tambah user
-            self.add_user_btn = QPushButton("👤 Add User")
-            # ... (style dan connect add_user_btn seperti sebelumnya) ...
-            self.add_user_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #2ECC71; color: white; border: none;
-                    padding: 10px; border-radius: 18px; font-size: 13px;
-                    font-weight: 500; margin: 5px 20px;
-                }
-                QPushButton:hover { background-color: #27AE60; }
-                QPushButton:pressed { background-color: #1E8449; }
-            """)
-            self.add_user_btn.clicked.connect(self.handle_add_user_button_click)
-            sidebar_layout.addWidget(self.add_user_btn)
+            # self.add_user_btn = QPushButton("👤 Add User")
+            # # ... (style dan connect add_user_btn seperti sebelumnya) ...
+            # self.add_user_btn.setStyleSheet("""
+            #     QPushButton {
+            #         background-color: #2ECC71; color: white; border: none;
+            #         padding: 10px; border-radius: 18px; font-size: 13px;
+            #         font-weight: 500; margin: 5px 20px;
+            #     }
+            #     QPushButton:hover { background-color: #27AE60; }
+            #     QPushButton:pressed { background-color: #1E8449; }
+            # """)
+            # self.add_user_btn.clicked.connect(self.handle_add_user_button_click)
+            # sidebar_layout.addWidget(self.add_user_btn)
 
-            # Tombol "New Custom Conversation" untuk technician
-            self.new_custom_conv_btn = QPushButton("💬+ New Custom Conversation")
-            self.new_custom_conv_btn.setStyleSheet("""
+            # # Tombol "New Custom Conversation" untuk technician
+            # self.new_custom_conv_btn = QPushButton("💬+ New Custom Conversation")
+            # self.new_custom_conv_btn.setStyleSheet("""
+            #     QPushButton {
+            #         background-color: #3498DB; /* Warna biru sebagai contoh */
+            #         color: white; border: none;
+            #         padding: 10px; border-radius: 18px; font-size: 13px;
+            #         font-weight: 500; margin: 5px 20px;
+            #     }
+            #     QPushButton:hover { background-color: #2980B9; }
+            #     QPushButton:pressed { background-color: #1F618D; }
+            # """)
+            # self.new_custom_conv_btn.clicked.connect(self.handle_new_custom_conversation_click)
+            # sidebar_layout.addWidget(self.new_custom_conv_btn)
+            self.add_contact_btn = QPushButton("👤 Add Contact")
+            self.add_contact_btn.setStyleSheet("""
                 QPushButton {
-                    background-color: #3498DB; /* Warna biru sebagai contoh */
+                    background-color: #28A745; /* Warna hijau yang berbeda */
                     color: white; border: none;
                     padding: 10px; border-radius: 18px; font-size: 13px;
-                    font-weight: 500; margin: 5px 20px;
+                    font-weight: 500; margin: 17px 20px;
                 }
-                QPushButton:hover { background-color: #2980B9; }
-                QPushButton:pressed { background-color: #1F618D; }
+                QPushButton:hover { background-color: #218838; }
+                QPushButton:pressed { background-color: #1E7E34; }
             """)
-            self.new_custom_conv_btn.clicked.connect(self.handle_new_custom_conversation_click)
-            sidebar_layout.addWidget(self.new_custom_conv_btn)
+            self.add_contact_btn.clicked.connect(self.handle_add_contact_click) # Handler baru
+            sidebar_layout.addWidget(self.add_contact_btn)
             
         chat_header_layout = QHBoxLayout()
         chat_header_layout.setContentsMargins(24, 15, 24, 20) 
@@ -756,7 +805,7 @@ class ChatWindow(QWidget):
         
         # Message input area
         input_area = QWidget()
-        input_area.setFixedHeight(80)
+        # input_area.setFixedHeight(80)
         # input_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)  
         input_area.setStyleSheet("""
             QWidget {
@@ -790,7 +839,7 @@ class ChatWindow(QWidget):
         # self.message_input = QTextEdit()
         self.message_input = FilePasteTextEdit(self)
         # self.message_input.setMaximumHeight(48)
-        self.message_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.message_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.message_input.setPlaceholderText("Add a comment or paste a file...")
         self.message_input.setStyleSheet("""
             QTextEdit {
@@ -842,7 +891,8 @@ class ChatWindow(QWidget):
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             }
         """)
-        
+    
+
     def filter_conversations(self, text):
         search_text = text.lower().strip() # Teks pencarian, lowercase, dan hapus spasi di awal/akhir
 
@@ -896,8 +946,103 @@ class ChatWindow(QWidget):
         # Seluruh input area bisa disembunyikan/ditampilkan jika diinginkan
         # self.input_area_widget.setVisible(active) # Opsional, jika ingin menyembunyikan seluruh bar input
     
-    
-    
+    def handle_new_conversation_added(self, data):
+        new_conv_data = data.get('conversation_data')
+        if not new_conv_data:
+            print("DEBUG: ChatWindow - Menerima 'conversation_created' tanpa data percakapan.")
+            return
+
+        print(f"DEBUG: ChatWindow - Menangani percakapan baru yang ditambahkan via WebSocket: ID {new_conv_data.get('id')}")
+
+        # 1. Cek apakah percakapan ini sudah ada di list
+        exists = False
+        for i in range(self.conversation_list.count()):
+            item = self.conversation_list.item(i)
+            if item.data(Qt.UserRole) == new_conv_data['id']:
+                exists = True
+                # (Opsional) Update data item jika sudah ada (seharusnya tidak terjadi untuk event 'created')
+                # widget = self.conversation_list.itemWidget(item)
+                # if isinstance(widget, ConversationItem):
+                #     widget.conversation_data = new_conv_data
+                #     # Update UI widget jika perlu
+                break
+
+        if not exists:
+            # Tambahkan ConversationItem baru ke QListWidget
+            item = QListWidgetItem()
+            item.setData(Qt.UserRole, new_conv_data['id'])
+
+            last_preview = new_conv_data.get('last_message_preview', "No messages yet.")
+            conv_widget = ConversationItem(new_conv_data, self.user['role'], last_preview)
+            item.setSizeHint(conv_widget.sizeHint())
+
+            # Masukkan di paling atas (atau sesuai urutan last_updated jika event tidak selalu untuk item terbaru)
+            self.conversation_list.insertItem(0, item) 
+            self.conversation_list.setItemWidget(item, conv_widget)
+
+            print(f"DEBUG: ChatWindow - Percakapan baru ID {new_conv_data['id']} ditambahkan ke list.")
+
+            # (Opsional) Jika ini adalah percakapan yang melibatkan user saat ini dan ingin menandainya
+            # self.mark_conversation_unread(new_conv_data['id'], last_preview)
+
+            # (Opsional) Jika ingin langsung memilihnya
+            # if new_conv_data.get('employee_id') == self.user['id'] or new_conv_data.get('technician_id') == self.user['id']:
+            #    self.conversation_list.setCurrentItem(item)
+            #    self.select_conversation(item)
+        else:
+            print(f"DEBUG: ChatWindow - Percakapan baru ID {new_conv_data['id']} sudah ada di list, tidak ditambahkan ulang.")
+
+        # Atau cara yang lebih sederhana adalah panggil self.load_conversations()
+        # self.load_conversations()
+        # Namun, menangani event secara spesifik lebih efisien
+    def handle_add_contact_click(self):
+        dialog = AddUserDialog(self) # Menggunakan dialog yang sama
+        if dialog.exec_() == QDialog.Accepted:
+            user_data = dialog.get_data()
+
+            # Validasi dasar (sama seperti sebelumnya)
+            if not user_data['username'] or not user_data['full_name']:
+                QMessageBox.warning(self, "Input Error", "Username and Full Name cannot be empty.")
+                return
+
+            if user_data['role'] in ['technician', 'ga'] and not user_data['password']:
+                QMessageBox.warning(self, "Input Error", f"Password is required for the {user_data['role']} role.")
+                return
+
+            try:
+                # Endpoint tetap /add_user, server yang akan diubah logikanya
+                response = requests.post(f"{BASE_URL}/add_user", json=user_data)
+                response_data = response.json()
+
+                if response.status_code == 200 and response_data.get('success'):
+                    # Pesan sukses bisa lebih umum atau menyertakan info dari server
+                    message = response_data.get('message', f"User '{user_data['username']}' added successfully!")
+                    num_convs = response_data.get('conversations_created_count', 0)
+                    if num_convs > 0:
+                        message += f"\nAutomatically created {num_convs} conversation(s)."
+
+                    QMessageBox.information(self, "Success", message)
+
+                    # PENTING: Muat ulang percakapan karena user baru DAN percakapan baru mungkin telah dibuat
+                    self.load_conversations() 
+
+                elif response.status_code == 409:
+                    QMessageBox.warning(self, "Conflict", f"Failed to add user: {response_data.get('message', 'Username already exists or conflict.')}")
+                elif response.status_code == 400:
+                    QMessageBox.warning(self, "Input Error", f"Failed to add user: {response_data.get('message', 'Invalid input.')}")
+                else:
+                    QMessageBox.critical(self, "Error", f"Failed to add user: {response_data.get('message', f'Server error {response.status_code}')}")
+
+            except requests.exceptions.RequestException as e:
+                QMessageBox.critical(self, "Connection Error", f"Could not connect to server: {e}")
+            except json.JSONDecodeError:
+                QMessageBox.critical(self, "Server Error", f"Invalid response from server: {response.text}")
+            except Exception as e_generic:
+                QMessageBox.critical(self, "Error", f"An unexpected error occurred: {e_generic}")
+
+    # HAPUS ATAU KOMENTARI HANDLER LAMA INI JIKA SUDAH TIDAK DIGUNAKAN LANGSUNG
+    # def handle_add_user_button_click(self): ...
+    # def handle_new_custom_conversation_click(self): ...
     def handle_new_custom_conversation_click(self):
         dialog = CreateConversationDialog(self)
         if dialog.exec_() == QDialog.Accepted:
@@ -1323,8 +1468,22 @@ class ChatWindow(QWidget):
         # 5. (Opsional) Hapus sorotan dari QListWidget jika ada
         if self.conversation_list.currentItem():
             self.conversation_list.currentItem().setSelected(False)
-            self.conversation_list.setCurrentItem(None) # Ini penting untuk menghapus fokus    
-            
+            self.conversation_list.setCurrentItem(None) # Ini penting untuk menghapus fokus   
+             
+    def keyPressEvent(self, event: QKeyEvent):
+        """Menangani event tombol keyboard yang ditekan."""
+        if event.key() == Qt.Key_Escape:
+            # Hanya jalankan fungsi kembali jika tombol back sed    ang terlihat
+            # (artinya, pengguna sedang dalam tampilan percakapan)
+            if self.back_button.isVisible():
+                self.go_back_to_selection_view()
+                event.accept()  # Menandakan bahwa event ini sudah ditangani
+                return
+
+        # Jika bukan tombol Escape atau tombol back tidak visible,
+        # teruskan event ke handler default kelas induk.
+        super().keyPressEvent(event)         
+        
     def load_messages(self, conversation_id, scroll_to_bottom=False):
         print(f"DEBUG: ChatWindow - Memuat pesan untuk conv_id: {conversation_id}") # DEBUG
         try:
@@ -1639,11 +1798,35 @@ class ChatWindow(QWidget):
             print(f"DEBUG: Error koneksi saat membuat percakapan: {e}") # DEBUG
     
     def closeEvent(self, event):
-        print("DEBUG: ChatWindow - Menutup ChatWindow, menghentikan WebSocket thread.")
+        print("DEBUG: ChatWindow - closeEvent triggered. Returning to LoginWindow.")
+
+        # 1. Hentikan WebSocketThread
         if hasattr(self, 'ws_thread') and self.ws_thread.is_alive():
-            self.ws_thread.stop()  # Panggil metode stop dari WebSocketThread yang baru
+            print("DEBUG: ChatWindow - Stopping WebSocket thread...")
+            self.ws_thread.stop()  # Panggil metode stop dari WebSocketThread
             self.ws_thread.join(timeout=2) # Tunggu thread selesai (opsional, dengan timeout)
-        super().closeEvent(event)
+            if self.ws_thread.is_alive():
+                print("DEBUG: ChatWindow - WebSocket thread did not stop in time.")
+            else:
+                print("DEBUG: ChatWindow - WebSocket thread stopped.")
+        else:
+            print("DEBUG: ChatWindow - WebSocket thread not found or not alive.")
+
+        # 2. Buat dan tampilkan instance baru dari LoginWindow
+        # Kita akan membuat atribut sementara untuk LoginWindow baru agar tidak langsung di-garbage collect
+        # sebelum sempat ditampilkan, meskipun .show() biasanya cukup.
+        print("DEBUG: ChatWindow - Re-instantiating and showing LoginWindow.")
+        self._login_window_after_close = LoginWindow() # Buat instance baru
+        self._login_window_after_close.show()
+
+        # 3. Terima event close untuk ChatWindow ini agar benar-benar ditutup dan dihancurkan.
+        # Karena LoginWindow baru sudah ditampilkan, aplikasi tidak akan keluar
+        # (jika QApplication.quitOnLastWindowClosed() adalah default True).
+        print("DEBUG: ChatWindow - Accepting close event to close and destroy current ChatWindow.")
+        event.accept()
+        # super().closeEvent(event) # bisa juga digunakan sebagai alternatif event.accept()
+                                 # jika ada logika closeEvent di parent class QWidget yang ingin dijalankan.
+                                 # Untuk kasus umum, event.accept() cukup.
 
 # ... (impor lain yang sudah ada: QDialog, QVBoxLayout, QLabel, QComboBox, QPushButton, QMessageBox, requests) ...
 
@@ -1851,11 +2034,17 @@ class AddUserDialog(QDialog):
 class LoginWindow(QWidget):
     def __init__(self):
         super().__init__()
+        
+        self.settings = QSettings("MyCompany", "ITChat") 
+        self.saved_accounts = [] # Untuk menyimpan daftar akun yang dimuat
         self.setup_ui()
+        self.load_saved_accounts_to_combo() # Muat login yang tersimpan
     
     def setup_ui(self):
-        self.setWindowTitle("Login - IT Support Chat")
-        self.setFixedSize(480, 740)
+        self.setWindowTitle("Login - IT Chat")
+        # self.setFixedSize(480, 800)
+        self.resize(480, 750)
+        
         
         # Main container
         main_layout = QVBoxLayout()
@@ -1883,7 +2072,7 @@ class LoginWindow(QWidget):
         top_layout.addWidget(logo_label)
         
         # Title
-        title = QLabel("IT Support Chat")
+        title = QLabel("IT Chat")
         title.setStyleSheet("""
             QLabel {
                 font-size: 28px; 
@@ -1916,6 +2105,103 @@ class LoginWindow(QWidget):
         form_layout = QVBoxLayout()
         form_layout.setContentsMargins(40, 20, 20, 20)
         form_layout.setSpacing(10)
+        
+        saved_accounts_header_layout = QHBoxLayout()
+        saved_accounts_label = QLabel("Saved Accounts:")
+        saved_accounts_label.setStyleSheet("font-size: 13px; color: #555; margin-bottom: 0px;")
+        form_layout.addWidget(saved_accounts_label)
+        
+        saved_accounts_header_layout.addWidget(saved_accounts_label)
+        saved_accounts_header_layout.addStretch() # Dorong tombol clear ke kanan
+
+        self.clear_cache_button = QPushButton("Clear") # Bisa juga "Clear All" atau ikon
+        self.clear_cache_button.setStyleSheet("""
+            QPushButton {
+                font-size: 11px; color: #E74C3C; /* Merah */
+                background-color: transparent;
+                border: 1px solid #E74C3C;
+                border-radius: 4px;
+                padding: 3px 8px;
+                margin-left: 5px; /* Jarak dari label jika tidak ada stretch */
+            }
+            QPushButton:hover { background-color: #FADBD8; /* Merah muda saat hover */ }
+            QPushButton:pressed { background-color: #F5B7B1; }
+        """)
+        self.clear_cache_button.setToolTip("Clear all saved login accounts")
+        self.clear_cache_button.clicked.connect(self.clear_saved_accounts)
+        saved_accounts_header_layout.addWidget(self.clear_cache_button)
+        
+        form_layout.addLayout(saved_accounts_header_layout) # Tambahkan layout horizontal ini
+
+        self.accounts_combo = QComboBox()
+        self.accounts_combo.setStyleSheet("""
+            QComboBox {
+                padding: 12px; 
+                font-size: 14px; 
+                border: 1px solid #E0E0E0;
+                border-radius: 8px; 
+                background-color: #FDFDFD;
+                /* Gaya untuk teks di kotak QComboBox utama saat item dipilih & dropdown tertutup */
+                selection-background-color: #e6efff; /* Warna latar pilihan di kotak utama */
+                selection-color: #333; /* Warna teks pilihan di kotak utama */
+            }
+            QComboBox::drop-down { 
+                border: none; 
+                /* Jika Anda ingin custom drop-down arrow, bisa diatur di sini */
+                /* subcontrol-origin: padding; */
+                /* subcontrol-position: top right; */
+                /* width: 20px; */
+                /* border-left-width: 1px; */
+                /* border-left-color: darkgray; */
+                /* border-left-style: solid; */
+                /* border-top-right-radius: 3px; */
+                /* border-bottom-right-radius: 3px; */
+            }
+            QComboBox::down-arrow { 
+                /* image: url(path/to/your/custom_arrow.png); */ /* Ganti dengan path ikon panah custom jika ada */
+                /* Jika ingin panah default tapi dengan style berbeda, atau panah kecil, bisa lebih kompleks */
+                /* Untuk menyembunyikan sepenuhnya: */
+                image: url(none); 
+            }
+
+            /* Ini untuk tampilan dropdown list (popup) */
+            QComboBox QAbstractItemView {
+                background-color: white; /* Latar belakang dropdown list */
+                border: 1px solid #D0D0D0; /* Border untuk dropdown list */
+                border-radius: 4px;
+                selection-background-color: transparent; /* PENTING: membuat seleksi default view transparan */
+                                                        /* agar style item:selected kita yang dominan */
+                outline: 0px; /* Menghilangkan outline fokus (jika ada) */
+            }
+
+            /* Ini untuk setiap item di dalam dropdown list */
+            QComboBox QAbstractItemView::item {
+                padding: 8px 12px; /* Padding untuk setiap item */
+                color: #333; /* Warna teks item default */
+                background-color: white; /* Latar belakang item default */
+            }
+
+            /* Item saat di-hover mouse di dropdown list */
+            QComboBox QAbstractItemView::item:hover {
+                background-color: #f0f5ff; /* Warna latar saat hover, misal biru muda */
+                color: #000; /* Warna teks saat hover */
+            }
+
+            /* Item yang DIPILIH di dalam dropdown list */
+            QComboBox QAbstractItemView::item:selected {
+                background-color: #cce0ff; /* Warna latar untuk item terpilih, misal biru lebih gelap */
+                                        /* Jika ingin benar-benar transparan: background-color: transparent; */
+                color: #000000; /* Warna teks untuk item terpilih */
+                /* Jika background-color: transparent;, Anda mungkin ingin warna teks yang berbeda, contoh: */
+                /* color: #0052cc; */ /* Biru tua untuk teks jika latar transparan */
+            }
+        """)
+        self.accounts_combo.currentIndexChanged.connect(self.on_account_selected_from_combo)
+        form_layout.addWidget(self.accounts_combo)
+        # --- End Saved Accounts ComboBox ---
+        
+        
+        
         
         # Welcome text
         welcome_label = QLabel("Welcome back!")
@@ -1998,6 +2284,13 @@ class LoginWindow(QWidget):
         """)
         form_layout.addWidget(self.password_input)
         
+                # --- Remember Me Checkbox ---
+        self.remember_me_checkbox = QCheckBox("Remember me")
+        self.remember_me_checkbox.setStyleSheet("font-size: 14px; color: #333; padding-top: 5px;")
+        self.remember_me_checkbox.setChecked(True) # Defaultnya tercentang
+        form_layout.addWidget(self.remember_me_checkbox)
+        # --- End Remember Me Checkbox ---
+        
         # Login button
         login_btn = QPushButton("Sign In")
         login_btn.clicked.connect(self.handle_login)
@@ -2066,34 +2359,144 @@ class LoginWindow(QWidget):
             }
         """)
     
+    def load_saved_accounts_to_combo(self):
+        self.accounts_combo.blockSignals(True) # Blokir sinyal agar tidak trigger saat mengisi
+        self.accounts_combo.clear()
+        self.accounts_combo.addItem("-- Select a saved account --", userData=None) # Placeholder
+
+        # Muat dari QSettings, default ke list kosong jika tidak ada
+        self.saved_accounts = self.settings.value("saved_it_accounts", []) 
+        
+        # Pastikan self.saved_accounts adalah list (jika QSettings mengembalikan None atau tipe lain)
+        if not isinstance(self.saved_accounts, list):
+            self.saved_accounts = []
+
+        for account in self.saved_accounts:
+            if isinstance(account, dict) and "username" in account:
+                 # Simpan seluruh objek akun di userData untuk akses mudah nanti
+                self.accounts_combo.addItem(account["username"], userData=account)
+        
+        self.accounts_combo.blockSignals(False) # Aktifkan kembali sinyal
+
+    def on_account_selected_from_combo(self, index):
+        if index <= 0: # Jika placeholder "-- Select a saved account --" yang dipilih
+            self.username_input.clear()
+            self.password_input.clear()
+            return
+
+        selected_account_data = self.accounts_combo.itemData(index) # Ambil data dari userData
+        if selected_account_data and isinstance(selected_account_data, dict):
+            self.username_input.setText(selected_account_data.get("username", ""))
+            # PERINGATAN: Password disimpan sebagai plain text di QSettings!
+            self.password_input.setText(selected_account_data.get("password", ""))
+    
+    # def handle_login(self):
+    #     username = self.username_input.text()
+    #     password = self.password_input.text()
+        
+    #     if not username or not password:
+    #         self.show_error("Username and password are required")
+    #         return
+        
+    #     data = {
+    #         'username': username,
+    #         'password': password
+    #     }
+        
+    #     try:
+    #         response = requests.post(f"{BASE_URL}/login_it", json=data)
+    #         if response.status_code == 200:
+    #             result = response.json()
+    #             if result['success']:
+    #                 self.chat_window = ChatWindow(result['user'])
+    #                 self.chat_window.show()
+    #                 self.close()
+    #             else:
+    #                 self.show_error("Invalid username or password. Please try again.")
+    #         else:
+    #             self.show_error("Server error occurred. Please try again later.")
+    #     except requests.exceptions.ConnectionError:
+    #         self.show_error("Cannot connect to server. Please check your connection.")
+    
     def handle_login(self):
+        print("DEBUG: handle_login called") # DEBUG
         username = self.username_input.text()
         password = self.password_input.text()
         
         if not username or not password:
+            print(f"DEBUG: Username entered: {username}") # DEBUG
+            print(f"DEBUG: Password entered: {password}") # DEBUG
             self.show_error("Username and password are required")
             return
         
-        data = {
-            'username': username,
-            'password': password
-        }
+        data = {'username': username, 'password': password} # Password dikirim ke server untuk di-hash & dicek
         
         try:
-            response = requests.post(f"{BASE_URL}/login_it", json=data)
+            response = requests.post(f"{BASE_URL}/login_it", json=data) # Endpoint login IT
             if response.status_code == 200:
                 result = response.json()
                 if result['success']:
+                    # Jika login berhasil dan "Remember me" dicentang
                     self.chat_window = ChatWindow(result['user'])
-                    self.chat_window.show()
+                    
+                    print(f"DEBUG: Login successful for user {username}. User data: {result['user']}") # DEBUG
+                    if self.remember_me_checkbox.isChecked():
+                        print(f"DEBUG: Saving account {username} to settings.") # DEBUG
+                        self.save_account_to_settings(username, password)
+                    self.chat_window.show()# Simpan password ASLI yang diketik pengguna
                     self.close()
+                    
                 else:
-                    self.show_error("Invalid username or password. Please try again.")
+                    self.show_error(result.get('message', "Invalid username or password."))
             else:
-                self.show_error("Server error occurred. Please try again later.")
+                self.show_error(f"Server error: {response.status_code}. Please try again later.")
         except requests.exceptions.ConnectionError:
             self.show_error("Cannot connect to server. Please check your connection.")
-    
+        except Exception as e:
+            self.show_error(f"An unexpected error occurred: {str(e)}")
+            
+    def save_account_to_settings(self, username, password_to_save):
+        # PERINGATAN: Menyimpan password seperti ini tidak aman.
+        # Ini hanya untuk kemudahan lokal dan demo.
+        
+        # Muat akun yang sudah ada
+        current_saved_accounts = self.settings.value("saved_it_accounts", [])
+        if not isinstance(current_saved_accounts, list): # Pastikan itu list
+            current_saved_accounts = []
+
+        account_exists = False
+        for acc in current_saved_accounts:
+            if isinstance(acc, dict) and acc.get("username") == username:
+                acc["password"] = password_to_save # Update password jika username sudah ada
+                account_exists = True
+                break
+        
+        if not account_exists:
+            current_saved_accounts.append({"username": username, "password": password_to_save})
+        
+        # Batasi jumlah akun yang disimpan (misalnya 5 terakhir)
+        max_saved_accounts = 5 
+        if len(current_saved_accounts) > max_saved_accounts:
+            current_saved_accounts = current_saved_accounts[-max_saved_accounts:]
+
+        self.settings.setValue("saved_it_accounts", current_saved_accounts)
+        self.settings.sync() # Pastikan data ditulis ke penyimpanan
+        
+        # Muat ulang ComboBox untuk menampilkan perubahan (jika ada)
+        self.load_saved_accounts_to_combo()
+        
+    def clear_saved_accounts(self):
+        reply = QMessageBox.question(self, "Clear Saved Accounts",
+                                    "Are you sure you want to clear all saved accounts?",
+                                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            self.settings.remove("saved_it_accounts") # Hapus key dari settings
+            self.settings.sync() # Pastikan perubahan ditulis
+            self.load_saved_accounts_to_combo() # Muat ulang ComboBox (akan jadi kosong)
+            self.username_input.clear()
+            self.password_input.clear()
+            QMessageBox.information(self, "Cleared", "Saved accounts have been cleared.")
+        
     def show_error(self, message):
         self.error_label.setText(f"⚠️ {message}")
         self.error_label.show()

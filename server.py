@@ -13,7 +13,7 @@ from werkzeug.utils import secure_filename
 from flask import Flask, request, jsonify, send_from_directory
 from apscheduler.schedulers.background import BackgroundScheduler
 
-IP = "192.168.45.171"
+IP = "192.168.47.190"
 # IP = "192.168.1.7"
 PORT = "5000"
 
@@ -597,59 +597,248 @@ def uploaded_file_serve(filename):
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
 # ... (kode server.py yang sudah ada) ...
-
 @app.route('/add_user', methods=['POST'])
 def add_user():
     data = request.get_json()
     username = data.get('username')
     full_name = data.get('full_name')
-    password = data.get('password') # Bisa kosong jika role employee
+    password = data.get('password') 
     role = data.get('role')
 
-    # Validasi field inti
     if not all([username, full_name, role]):
         return jsonify({'success': False, 'message': 'Username, Full Name, and Role are required fields'}), 400
 
     if role not in ['employee', 'technician', 'ga']:
         return jsonify({'success': False, 'message': 'Invalid role specified'}), 400
 
-    hashed_password = None # Default ke None (untuk employee tanpa password)
-
-    if role == 'technician' or role == 'ga':
-        if not password: # Password wajib untuk teknisi
-            return jsonify({'success': False, 'message': 'Password is required for technician role'}), 400
+    hashed_password = None
+    if role in ['technician', 'ga']:
+        if not password:
+            return jsonify({'success': False, 'message': f'Password is required for {role} role'}), 400
         hashed_password = hash_password(password)
-    
-        
-    elif role == 'employee':
-        if password: # Jika employee mengisi password, kita hash
-            hashed_password = hash_password(password)
-        # Jika password kosong untuk employee, hashed_password tetap None
+    elif role == 'employee' and password:
+        hashed_password = hash_password(password)
 
     cur = mysql.connection.cursor()
     try:
-        # Cek apakah username sudah ada
         cur.execute("SELECT id FROM users WHERE username = %s", (username,))
         if cur.fetchone():
             cur.close()
             return jsonify({'success': False, 'message': 'Username already exists'}), 409
 
-        # Insert pengguna baru
-        # Kolom password di DB harus bisa menerima NULL
         cur.execute("""
             INSERT INTO users (username, full_name, password, role)
             VALUES (%s, %s, %s, %s)
         """, (username, full_name, hashed_password, role))
         mysql.connection.commit()
         new_user_id = cur.lastrowid
+
+        # --- LOGIKA PEMBUATAN PERCAKAPAN OTOMATIS ---
+        conversations_created_count = 0
+        if role == 'employee':
+            # Dapatkan semua ID technician dan GA
+            cur.execute("SELECT id FROM users WHERE role = 'technician' OR role = 'ga'")
+            support_staff_ids = [row[0] for row in cur.fetchall()]
+            for staff_id in support_staff_ids:
+                # Buat percakapan: employee baru dengan setiap staff
+                cur.execute("""
+                    INSERT INTO conversations (employee_id, technician_id, status, last_updated) 
+                    VALUES (%s, %s, %s, NOW())
+                """, (new_user_id, staff_id, 'open'))
+                mysql.connection.commit()
+                conversation_id = cur.lastrowid
+                conversations_created_count += 1
+                emit_new_conversation_details(conversation_id, cur) # Helper function
+
+        elif role == 'technician' or role == 'ga':
+            # Dapatkan semua ID employee
+            cur.execute("SELECT id FROM users WHERE role = 'employee'")
+            employee_ids = [row[0] for row in cur.fetchall()]
+            for emp_id in employee_ids:
+                # Buat percakapan: setiap employee dengan technician/GA baru
+                cur.execute("""
+                    INSERT INTO conversations (employee_id, technician_id, status, last_updated) 
+                    VALUES (%s, %s, %s, NOW())
+                """, (emp_id, new_user_id, 'open')) # Perhatikan urutan ID
+                mysql.connection.commit()
+                conversation_id = cur.lastrowid
+                conversations_created_count += 1
+                emit_new_conversation_details(conversation_id, cur) # Helper function
+
         cur.close()
-        return jsonify({'success': True, 'message': 'User added successfully', 'user_id': new_user_id})
+        return jsonify({
+            'success': True, 
+            'message': f'User {full_name} ({role}) added successfully.', 
+            'user_id': new_user_id,
+            'conversations_created_count': conversations_created_count
+        })
 
     except Exception as e:
         mysql.connection.rollback()
-        cur.close()
-        print(f"Error adding user: {e}")
+        if cur:
+            cur.close()
+        print(f"Error adding user or creating conversations: {e}")
         return jsonify({'success': False, 'message': f'Database error: {str(e)}'}), 500
+
+def emit_new_conversation_details(conversation_id, cursor):
+    """
+    Helper untuk mengambil detail percakapan dan meng-emit via Socket.IO.
+    Pastikan cursor masih valid dan transaksi untuk pembuatan percakapan sudah di-commit.
+    """
+    try:
+        cursor.execute("""
+            SELECT 
+                c.id, c.status, c.employee_id, c.technician_id,
+                e.full_name as employee_name, t.full_name as tech_name,
+                c.last_updated,
+                m.message as last_message_preview,
+                m.sent_at as last_message_time 
+            FROM conversations c
+            JOIN users e ON c.employee_id = e.id
+            LEFT JOIN users t ON c.technician_id = t.id
+            LEFT JOIN messages m ON c.last_message_id = m.id
+            WHERE c.id = %s
+        """, (conversation_id,))
+        conv_row = cursor.fetchone()
+
+        if conv_row:
+            conv_details = {
+                'id': conv_row[0],
+                'status': conv_row[1],
+                'employee_id': conv_row[2],
+                'technician_id': conv_row[3],
+                'employee_name': conv_row[4],
+                'tech_name': conv_row[5] if conv_row[5] else 'N/A', # Tech might be null if created by system before assignment
+                'last_updated': conv_row[6].strftime('%Y-%m-%d %H:%M:%S') if conv_row[6] else None,
+                'last_message_preview': conv_row[7] if conv_row[7] else "Conversation started.",
+                'last_message_time': (conv_row[8].strftime('%Y-%m-%d %H:%M:%S') if conv_row[8] 
+                                     else (conv_row[6].strftime('%Y-%m-%d %H:%M:%S') if conv_row[6] else None))
+            }
+            socketio.emit('conversation_created', {'conversation_data': conv_details})
+            print(f"SERVER: Emitted 'conversation_created' for conv_id: {conversation_id}")
+        else:
+            print(f"SERVER_WARNING: Could not fetch details for new conv_id: {conversation_id} to emit.")
+    except Exception as e:
+        print(f"SERVER_ERROR: Failed to emit new conversation details for conv_id {conversation_id}: {e}")
+        
+# @app.route('/add_user', methods=['POST'])
+# def add_user():
+#     data = request.get_json()
+#     username = data.get('username')
+#     full_name = data.get('full_name')
+#     password = data.get('password') # Bisa kosong jika role employee
+#     role = data.get('role')
+
+#     # Validasi field inti
+#     if not all([username, full_name, role]):
+#         return jsonify({'success': False, 'message': 'Username, Full Name, and Role are required fields'}), 400
+
+#     if role not in ['employee', 'technician', 'ga']:
+#         return jsonify({'success': False, 'message': 'Invalid role specified'}), 400
+
+#     hashed_password = None # Default ke None (untuk employee tanpa password)
+
+#     if role == 'technician' or role == 'ga':
+#         if not password: # Password wajib untuk teknisi
+#             return jsonify({'success': False, 'message': 'Password is required for technician role'}), 400
+#         hashed_password = hash_password(password)
+    
+        
+#     elif role == 'employee':
+#         if password: # Jika employee mengisi password, kita hash
+#             hashed_password = hash_password(password)
+#         # Jika password kosong untuk employee, hashed_password tetap None
+
+#     cur = mysql.connection.cursor()
+#     try:
+#         # Cek apakah username sudah ada
+#         cur.execute("SELECT id FROM users WHERE username = %s", (username,))
+#         if cur.fetchone():
+#             cur.close()
+#             return jsonify({'success': False, 'message': 'Username already exists'}), 409
+
+#         # Insert pengguna baru
+#         # Kolom password di DB harus bisa menerima NULL
+#         cur.execute("""
+#             INSERT INTO users (username, full_name, password, role)
+#             VALUES (%s, %s, %s, %s)
+#         """, (username, full_name, hashed_password, role))
+#         mysql.connection.commit()
+#         new_user_id = cur.lastrowid
+#         cur.close()
+#         return jsonify({'success': True, 'message': 'User added successfully', 'user_id': new_user_id})
+
+#     except Exception as e:
+#         mysql.connection.rollback()
+#         cur.close()
+#         print(f"Error adding user: {e}")
+#         return jsonify({'success': False, 'message': f'Database error: {str(e)}'}), 500
+
+# @app.route('/delete_conversation/<int:conv_id>', methods=['DELETE'])
+# def delete_conversation_route(conv_id):
+#     cur = None
+#     try:
+#         cur = mysql.connection.cursor()
+
+#         # Cek dulu apakah percakapan ada
+#         cur.execute("SELECT employee_id, technician_id FROM conversations WHERE id = %s", (conv_id,))
+#         conversation_exists = cur.fetchone()
+#         if not conversation_exists:
+#             cur.close()
+#             return jsonify({'success': False, 'message': f'Percakapan ID {conv_id} tidak ditemukan.'}), 404
+
+#         # (Opsional) Ambil file_path dari pesan yang akan dihapus jika ingin menghapus file fisik
+#         cur.execute("SELECT file_path FROM messages WHERE conversation_id = %s AND file_path IS NOT NULL", (conv_id,))
+#         files_to_delete_on_disk = [row[0] for row in cur.fetchall()]
+
+#         # Langkah 1: Atur last_message_id menjadi NULL di tabel conversations untuk percakapan ini.
+#         # Ini menghilangkan referensi foreign key ke tabel messages, sehingga pesan bisa dihapus.
+#         cur.execute("UPDATE conversations SET last_message_id = NULL WHERE id = %s", (conv_id,))
+#         print(f"DEBUG: Server - last_message_id di-set NULL untuk percakapan ID: {conv_id}")
+
+#         # Langkah 2: Hapus semua pesan yang terkait dengan conversation_id ini.
+#         cur.execute("DELETE FROM messages WHERE conversation_id = %s", (conv_id,))
+#         deleted_messages_count = cur.rowcount
+#         print(f"DEBUG: Server - Menghapus {deleted_messages_count} pesan dari percakapan ID: {conv_id}")
+
+#         # Langkah 3: Hapus percakapan itu sendiri dari tabel conversations.
+#         cur.execute("DELETE FROM conversations WHERE id = %s", (conv_id,))
+#         deleted_conversations_count = cur.rowcount
+#         print(f"DEBUG: Server - Menghapus {deleted_conversations_count} percakapan dengan ID: {conv_id}")
+        
+#         mysql.connection.commit() # Commit transaksi
+
+#         # Langkah 4: (Opsional Lanjutan) Hapus file fisik dari folder 'uploads'.
+#         if files_to_delete_on_disk:
+#             print(f"DEBUG: Server - Mencoba menghapus file fisik untuk percakapan ID: {conv_id}")
+#             for filename in files_to_delete_on_disk:
+#                 if filename:
+#                     try:
+#                         file_location = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+#                         if os.path.exists(file_location):
+#                             os.remove(file_location)
+#                             print(f"DEBUG: Server - File fisik '{filename}' berhasil dihapus.")
+#                         else:
+#                             print(f"DEBUG: Server - File fisik '{filename}' tidak ditemukan di disk.")
+#                     except Exception as e_file_delete:
+#                         print(f"DEBUG: Server - Error saat menghapus file fisik '{filename}': {e_file_delete}")
+        
+#         socketio.emit('conversation_deleted', {'conversation_id': conv_id})
+#         print(f"DEBUG: Server - Mengirim event 'conversation_deleted' untuk ID: {conv_id}")
+
+#         cur.close()
+#         return jsonify({'success': True, 'message': f'Percakapan ID {conv_id} dan semua pesannya berhasil dihapus.'})
+
+#     except Exception as e:
+#         if cur:
+#             mysql.connection.rollback()
+#             cur.close()
+#         print(f"DEBUG: Server - Error saat menghapus percakapan ID {conv_id}: {e}")
+#         # Error (1451) adalah OperationalError dari PyMySQL/MySQLdb, detailnya ada di e.args
+#         error_code = ""
+#         if hasattr(e, 'args') and len(e.args) > 0:
+#             error_code = f" (Kode Error DB: {e.args[0]})"
+#         return jsonify({'success': False, 'message': f'Terjadi kesalahan pada server{error_code}: {str(e)}'}), 500
 
 @app.route('/delete_user/<int:user_id_to_delete>', methods=['DELETE'])
 def delete_user_route(user_id_to_delete):
