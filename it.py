@@ -721,7 +721,7 @@ class ChatWindow(QWidget):
         chat_menu = QMenu(self) # Beri parent self (ChatWindow)
         
         # Tambahkan Aksi-Aksi ke Menu
-        self.action_edit_user = chat_menu.addAction("Edit") # Akan relevan jika user lain adalah employee
+        self.action_edit_user = chat_menu.addAction("Edit User") # Akan relevan jika user lain adalah employee
         self.action_delete_user = chat_menu.addAction("Delete User")   # Akan relevan jika user lain adalah employee
         
         chat_menu.setStyleSheet("""

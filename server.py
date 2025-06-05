@@ -7,10 +7,11 @@ from flask_socketio import SocketIO
 from flask_cors import CORS
 import hashlib
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 from werkzeug.utils import secure_filename
 from flask import Flask, request, jsonify, send_from_directory
+from apscheduler.schedulers.background import BackgroundScheduler
 
 IP = "192.168.79.125"
 # IP = "192.168.1.7"
@@ -33,6 +34,106 @@ app.config['MYSQL_PASSWORD'] = ''
 app.config['MYSQL_DB'] = 'it_support_chat'
 
 mysql = MySQL(app)
+
+
+def cleanup_old_messages_job():
+    print(f"[{datetime.now()}] Menjalankan job terjadwal: Pembersihan pesan mingguan (Skenario B).")
+    # Pastikan kita memiliki konteks aplikasi Flask
+    with app.app_context():
+        cur = None
+        try:
+            cur = mysql.connection.cursor()
+            
+            today = datetime.now()
+            # Job ini dijadwalkan berjalan pada hari Minggu.
+            # Kita ingin menghapus semua pesan SEBELUM hari Senin dari minggu yang baru saja berakhir.
+            # today.weekday(): Senin=0, Selasa=1, ..., Minggu=6.
+            # Jika hari ini Minggu (weekday == 6), Senin minggu ini adalah (today - timedelta(days=6)).
+            # Ini adalah batas tanggalnya. Pesan SEBELUM tanggal ini akan dihapus.
+            start_of_current_week_monday = today - timedelta(days=today.weekday()) 
+            cleanup_threshold_date = start_of_current_week_monday.replace(hour=0, minute=0, second=0, microsecond=0)
+            
+            cleanup_threshold_date_str = cleanup_threshold_date.strftime('%Y-%m-%d %H:%M:%S')
+            print(f"DEBUG: Cleanup (Skenario B) - Akan menghapus semua pesan yang dikirim sebelum {cleanup_threshold_date_str}.")
+
+            # Langkah 1: Atur last_message_id menjadi NULL di tabel conversations
+            # untuk pesan-pesan yang akan dihapus agar tidak melanggar foreign key.
+            sql_update_conversations = """
+                UPDATE conversations c
+                SET c.last_message_id = NULL
+                WHERE c.last_message_id IS NOT NULL AND c.last_message_id IN (
+                    SELECT id FROM messages WHERE sent_at < %s
+                );
+            """
+            cur.execute(sql_update_conversations, (cleanup_threshold_date_str,))
+            updated_convs_count = cur.rowcount
+            print(f"DEBUG: Cleanup (Skenario B) - last_message_id di-NULL-kan untuk {updated_convs_count} percakapan.")
+
+            # Langkah 2: Ambil daftar file_path dari pesan lama yang akan dihapus (jika ada)
+            sql_select_files = """
+                SELECT file_path FROM messages 
+                WHERE sent_at < %s AND file_path IS NOT NULL AND file_path != ''
+            """
+            cur.execute(sql_select_files, (cleanup_threshold_date_str,))
+            files_to_delete_on_disk = [row[0] for row in cur.fetchall()]
+            print(f"DEBUG: Cleanup (Skenario B) - Menemukan {len(files_to_delete_on_disk)} file untuk potensi penghapusan dari disk.")
+
+            # Langkah 3: Hapus pesan lama dari tabel messages
+            sql_delete_messages = "DELETE FROM messages WHERE sent_at < %s;"
+            cur.execute(sql_delete_messages, (cleanup_threshold_date_str,))
+            deleted_messages_count = cur.rowcount
+            print(f"DEBUG: Cleanup (Skenario B) - {deleted_messages_count} pesan lama berhasil dihapus dari database.")
+            
+            mysql.connection.commit()
+            print(f"DEBUG: Cleanup (Skenario B) - Transaksi database di-commit.")
+
+            # # Langkah 4: (Opsional) Hapus file fisik dari folder 'uploads'
+            # if files_to_delete_on_disk:
+            #     upload_folder = app.config.get('UPLOAD_FOLDER', 'uploads')
+            #     for filename in files_to_delete_on_disk:
+            #         try:
+            #             file_location = os.path.join(upload_folder, filename)
+            #             if os.path.exists(file_location):
+            #                 os.remove(file_location)
+            #                 print(f"DEBUG: Cleanup (Skenario B) - File fisik '{filename}' berhasil dihapus.")
+            #             # else:
+            #                 # print(f"DEBUG: Cleanup (Skenario B) - File fisik '{filename}' tidak ditemukan di disk.")
+            #         except Exception as e_file_delete:
+            #             print(f"DEBUG: Cleanup (Skenario B) - Error saat menghapus file fisik '{filename}': {e_file_delete}")
+            
+            print(f"[{datetime.now()}] Scheduled job: Pembersihan pesan mingguan (Skenario B) selesai.")
+
+        except Exception as e:
+            if cur:
+                mysql.connection.rollback()
+            print(f"[{datetime.now()}] ERROR selama pembersihan pesan mingguan terjadwal (Skenario B): {e}")
+        finally:
+            if cur:
+                cur.close()
+
+def start_scheduler():
+    scheduler = BackgroundScheduler(daemon=True)
+    # Jalankan job cleanup_old_messages_job:
+    # 'cron' digunakan untuk jadwal yang lebih spesifik.
+    # day_of_week='sun' berarti setiap hari Minggu.
+    # hour=1, minute=0 berarti jam 01:00 pagi.
+
+    scheduler.add_job(
+        cleanup_old_messages_job, 
+        trigger='cron', 
+        day_of_week='sun',  # 0=Senin, 1=Selasa, ..., 6=Minggu ATAU 'sun', 'mon', etc.
+        hour=1,             # Jam 1 pagi
+        minute=0,           # Menit ke-0
+        misfire_grace_time=3600 # Toleransi jika server down saat jadwal (1 jam)
+    )
+    
+    try:
+        scheduler.start()
+        print("APScheduler untuk pembersihan pesan mingguan (setiap Minggu pukul 01:00) telah dimulai.")
+    except Exception as e_scheduler:
+        print(f"Error starting APScheduler: {e_scheduler}")
+
+
 
 # Helper function
 def hash_password(password):
@@ -840,4 +941,6 @@ if __name__ == '__main__':
     # Pastikan UPLOAD_FOLDER sudah didefinisikan di konfigurasi app
     if not os.path.exists(app.config['UPLOAD_FOLDER']):
         os.makedirs(app.config['UPLOAD_FOLDER'])
+    
+    start_scheduler()  # Mulai scheduler untuk pembersihan pesan mingguan
     socketio.run(app, debug=True, host='0.0.0.0', port=5000, use_reloader=False)
