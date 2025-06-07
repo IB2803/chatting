@@ -21,8 +21,8 @@ from PyQt5.QtGui import QColor, QFont, QPainter, QBrush, QPalette, QPixmap, QIco
 # Suppress font warnings
 os.environ['QT_LOGGING_RULES'] = 'qt.qpa.fonts=false'
 
-IP = "192.168.47.190" 
-# IP = "192.168.1.7" 
+IP = "192.168.47.192" 
+# IP = "192.168.1.5" 
 PORT = "5000"
 
 # BASE_URL = "http://localhost:5000"
