@@ -139,6 +139,207 @@ def start_scheduler():
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
+@app.route('/get_support_staff', methods=['GET'])
+def get_support_staff():
+    # Endpoint ini khusus untuk mengambil semua user yang merupakan support staff (technician dan GA)
+    cur = None
+    try:
+        cur = mysql.connection.cursor()
+        # Ambil semua data yang mungkin diperlukan oleh dialog di klien
+        cur.execute("""
+            SELECT id, username, full_name, role 
+            FROM users 
+            WHERE role = 'technician' OR role = 'ga' 
+            ORDER BY full_name ASC
+        """)
+        
+        support_staff_list = []
+        for row in cur.fetchall():
+            support_staff_list.append({
+                "id": row[0],
+                "username": row[1],
+                "full_name": row[2],
+                "role": row[3]
+            })
+        
+        # Sertakan juga total jumlah technician untuk validasi di klien
+        technician_count = sum(1 for user in support_staff_list if user['role'] == 'technician')
+        
+        cur.close()
+        return jsonify({
+            'success': True, 
+            'users': support_staff_list,
+            'technician_count': technician_count
+        })
+    except Exception as e:
+        if cur:
+            cur.close()
+        print(f"SERVER_ERROR di /get_support_staff: {e}") 
+        return jsonify({'success': False, 'message': f'Gagal mengambil daftar support staff: {str(e)}'}), 500
+
+@app.route('/update_support_user/<int:user_id>', methods=['PUT'])
+def update_support_user(user_id):
+    """Endpoint untuk mengupdate data support staff (technician/ga)."""
+    data = request.get_json()
+    new_full_name = data.get('full_name')
+    new_password = data.get('password') # Bisa None
+
+    if not new_full_name:
+        return jsonify({'success': False, 'message': 'Nama lengkap tidak boleh kosong.'}), 400
+
+    cur = None
+    try:
+        cur = mysql.connection.cursor()
+        
+        # Cek apakah user ada dan merupakan support staff
+        cur.execute("SELECT role FROM users WHERE id = %s", (user_id,))
+        user = cur.fetchone()
+        if not user:
+            cur.close()
+            return jsonify({'success': False, 'message': 'User tidak ditemukan.'}), 404
+        if user[0] not in ['technician', 'ga']:
+            cur.close()
+            return jsonify({'success': False, 'message': 'Hanya role technician atau GA yang bisa diubah.'}), 403
+
+        # Siapkan query update
+        query_parts = ["full_name = %s"]
+        params = [new_full_name]
+
+        if new_password:
+            hashed_password = hash_password(new_password)
+            query_parts.append("password = %s")
+            params.append(hashed_password)
+        
+        params.append(user_id)
+        
+        sql_query = f"UPDATE users SET {', '.join(query_parts)} WHERE id = %s"
+        
+        cur.execute(sql_query, tuple(params))
+        mysql.connection.commit()
+        
+        cur.close()
+        return jsonify({'success': True, 'message': f'User {new_full_name} berhasil diupdate.'})
+
+    except Exception as e:
+        if cur:
+            mysql.connection.rollback()
+            cur.close()
+        print(f"SERVER_ERROR di /update_support_user/{user_id}: {e}")
+        return jsonify({'success': False, 'message': f'Error pada server: {e}'}), 500
+
+@app.route('/update_employee/<int:user_id>', methods=['PUT'])
+def update_employee(user_id):
+    """Endpoint untuk mengupdate data employee."""
+    data = request.get_json()
+    new_full_name = data.get('full_name')
+
+    if not new_full_name:
+        return jsonify({'success': False, 'message': 'Nama lengkap tidak boleh kosong.'}), 400
+
+    cur = None
+    try:
+        cur = mysql.connection.cursor()
+        
+        # Cek apakah user ada dan merupakan employee
+        cur.execute("SELECT role FROM users WHERE id = %s", (user_id,))
+        user = cur.fetchone()
+        if not user:
+            cur.close()
+            return jsonify({'success': False, 'message': 'User tidak ditemukan.'}), 404
+        if user[0] != 'employee':
+            cur.close()
+            return jsonify({'success': False, 'message': 'Hanya data employee yang bisa diubah melalui endpoint ini.'}), 403
+
+        # Update nama lengkap
+        cur.execute("UPDATE users SET full_name = %s WHERE id = %s", (new_full_name, user_id))
+        mysql.connection.commit()
+        
+        cur.close()
+        return jsonify({'success': True, 'message': f'Data employee berhasil diupdate.'})
+
+    except Exception as e:
+        if cur:
+            mysql.connection.rollback()
+            cur.close()
+        print(f"SERVER_ERROR di /update_employee/{user_id}: {e}")
+        return jsonify({'success': False, 'message': f'Error pada server: {e}'}), 500
+
+
+
+@app.route('/delete_support_user/<int:user_id>', methods=['DELETE'])
+def delete_support_user(user_id):
+    """Endpoint untuk menghapus support staff (technician/ga)."""
+    cur = None
+    try:
+        cur = mysql.connection.cursor()
+
+        # 1. Validasi: Pastikan user ada dan merupakan support staff
+        cur.execute("SELECT role, full_name FROM users WHERE id = %s", (user_id,))
+        user_to_delete = cur.fetchone()
+        if not user_to_delete:
+            cur.close()
+            return jsonify({'success': False, 'message': 'User tidak ditemukan.'}), 404
+        
+        role, full_name = user_to_delete
+        if role not in ['technician', 'ga']:
+            cur.close()
+            return jsonify({'success': False, 'message': 'Hanya role technician atau GA yang bisa dihapus.'}), 403
+
+        # 2. Validasi Keamanan: Jangan biarkan teknisi terakhir dihapus
+        if role == 'technician':
+            cur.execute("SELECT COUNT(*) FROM users WHERE role = 'technician'")
+            technician_count = cur.fetchone()[0]
+            if technician_count <= 1:
+                cur.close()
+                return jsonify({'success': False, 'message': 'Tidak bisa menghapus teknisi terakhir yang tersisa.'}), 400
+
+        # 3. Penanganan Percakapan: Set technician_id menjadi NULL pada percakapan yang ditangani
+        #    Ini akan membuat tiket menjadi "unassigned" daripada menghapus seluruh percakapan.
+        cur.execute("UPDATE conversations SET technician_id = NULL WHERE technician_id = %s", (user_id,))
+        print(f"DEBUG: {cur.rowcount} percakapan yang ditangani oleh user {user_id} telah di-unassign.")
+        
+        cur.execute("SELECT id FROM conversations WHERE employee_id = %s", (user_id))
+        conversation_ids_tuples = cur.fetchall()
+        conversation_ids_to_delete = [conv_tuple[0] for conv_tuple in conversation_ids_tuples]
+        
+        all_files_to_delete_on_disk = []
+
+        if conversation_ids_to_delete:
+            for conv_id in conversation_ids_to_delete:
+                # a. (Opsional) Ambil file_path dari pesan yang akan dihapus
+                cur.execute("SELECT file_path FROM messages WHERE conversation_id = %s AND file_path IS NOT NULL", (conv_id,))
+                files_in_conv = [row[0] for row in cur.fetchall()]
+                all_files_to_delete_on_disk.extend(files_in_conv)
+
+                # b. Atur last_message_id menjadi NULL di tabel conversations untuk percakapan ini
+                cur.execute("UPDATE conversations SET last_message_id = NULL WHERE id = %s", (conv_id,))
+                
+                # c. Hapus pesan dari percakapan ini
+                cur.execute("DELETE FROM messages WHERE conversation_id = %s", (conv_id,))
+                print(f"DEBUG: Server - Menghapus pesan dari percakapan ID: {conv_id}")
+
+            # d. Hapus semua percakapan yang terkait setelah pesannya dihapus
+            # Gunakan %s placeholder untuk setiap ID dalam list
+            format_strings = ','.join(['%s'] * len(conversation_ids_to_delete))
+            cur.execute(f"DELETE FROM conversations WHERE id IN ({format_strings})", tuple(conversation_ids_to_delete))
+            print(f"DEBUG: Server - Menghapus percakapan dengan ID: {conversation_ids_to_delete}")
+
+        # 4. Hapus User
+        cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
+        
+        mysql.connection.commit()
+        cur.close()
+        
+        return jsonify({'success': True, 'message': f'Support staff {full_name} berhasil dihapus.'})
+
+    except Exception as e:
+        if cur:
+            mysql.connection.rollback()
+            cur.close()
+        print(f"SERVER_ERROR di /delete_support_user/{user_id}: {e}")
+        return jsonify({'success': False, 'message': f'Error pada server: {e}'}), 500
+
+
 @app.route('/get_users_by_role/<string:role_name>', methods=['GET'])
 def get_users_by_role(role_name):
     # Untuk CreateConversationDialog, client memanggil untuk 'employee' dan 'technician'.
@@ -371,14 +572,15 @@ def get_conversations(user_id):
             c.employee_id,
             c.technician_id,
             e.full_name as employee_name, 
+            e.username as employee_username, -- TAMBAHKAN INI
             t.full_name as tech_name,
             c.last_updated,
-            m.message as last_message_preview,  -- Ambil teks pesan terakhir
-            m.sent_at as last_message_time  -- Ambil waktu pesan terakhir
+            m.message as last_message_preview,
+            m.sent_at as last_message_time
         FROM conversations c
         JOIN users e ON c.employee_id = e.id
         LEFT JOIN users t ON c.technician_id = t.id
-        LEFT JOIN messages m ON c.last_message_id = m.id  -- Join berdasarkan last_message_id
+        LEFT JOIN messages m ON c.last_message_id = m.id
         WHERE c.employee_id = %s OR c.technician_id = %s
         ORDER BY c.last_updated DESC
     """, (user_id, user_id))
@@ -391,10 +593,11 @@ def get_conversations(user_id):
             'employee_id': conv_row[2],
             'technician_id': conv_row[3],
             'employee_name': conv_row[4],
-            'tech_name': conv_row[5] if conv_row[5] else 'Belum ditugaskan',
-            'last_updated': conv_row[6].strftime('%Y-%m-%d %H:%M:%S') if conv_row[6] else None,
-            'last_message_preview': conv_row[7] if conv_row[7] else "No messages yet.", # Teks pesan terakhir
-            'last_message_time': conv_row[8].strftime('%Y-%m-%d %H:%M:%S') if conv_row[8] else (conv_row[6].strftime('%Y-%m-%d %H:%M:%S') if conv_row[6] else None) # Waktu pesan terakhir
+            'employee_username': conv_row[5], # TAMBAHKAN INI
+            'tech_name': conv_row[6] if conv_row[6] else 'Belum ditugaskan',
+            'last_updated': conv_row[7].strftime('%Y-%m-%d %H:%M:%S') if conv_row[7] else None,
+            'last_message_preview': conv_row[8] if conv_row[8] else "No messages yet.",
+            'last_message_time': conv_row[9].strftime('%Y-%m-%d %H:%M:%S') if conv_row[9] else (conv_row[7].strftime('%Y-%m-%d %H:%M:%S') if conv_row[7] else None)
         })
     cur.close()
     return jsonify(conversations_data)

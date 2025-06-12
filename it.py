@@ -386,15 +386,9 @@ class ChatWindow(QWidget):
         self.current_conversation = None
         self.unread_map = {} 
         self.message_cache = {}
-        self.setup_ui()
-        if not self.current_conversation:
-            self.chat_options_button.hide()
-        self.load_conversations() # Panggil setelah setup_ui
+        self.setup_ui()     
         
-        
-        
-        
-            # --- INISIALISASI SUARA NOTIFIKASI ---
+        # --- INISIALISASI SUARA NOTIFIKASI ---
         self.message_sound = QSoundEffect(self) # 'self' sebagai parent
 
         # Tentukan path ke file suara
@@ -750,8 +744,14 @@ class ChatWindow(QWidget):
         
         self.chat_options_button.setMenu(chat_menu)
         
-        # Sembunyikan tombol ini secara default, akan ditampilkan saat percakapan dipilih
-        self.chat_options_button.hide() 
+        # Atur visibilitas awal tombol berdasarkan peran user
+        if self.user['role'] == 'technician':
+            self.chat_options_button.show() # Selalu tampilkan untuk teknisi
+        else:
+            self.chat_options_button.hide()
+
+        # Atur teks dan status aksi menu di awal (konteks: tidak ada percakapan dipilih)
+        self.update_menu_actions_for_context()
 
         # Hubungkan sinyal triggered dari setiap aksi ke metode placeholder
         # Kita akan buat metode ini nanti
@@ -891,7 +891,55 @@ class ChatWindow(QWidget):
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             }
         """)
-    
+        
+        
+        if not self.current_conversation:
+            self.chat_options_button.hide()
+        # Panggil load_conversations di sini setelah semua UI siap
+        self.load_conversations()
+
+        # Atur visibilitas awal tombol berdasarkan peran user
+        if self.user['role'] == 'technician':
+            self.chat_options_button.show() # Selalu tampilkan untuk teknisi
+        else:
+            self.chat_options_button.hide() # Sembunyikan untuk peran lain (jika ada)
+
+        # Nonaktifkan aksi di awal jika tidak ada percakapan dipilih
+        if not self.current_conversation:
+            # Awalnya, semua aksi di-set untuk menargetkan tech/ga (karena tidak ada conv dipilih)
+            self.action_edit_user.setText("Edit User")
+            self.action_delete_user.setText("Hapus User")
+            # Logika enable/disable untuk edit/hapus tech/ga akan ada di handlernya langsung
+            self.action_edit_user.setEnabled(True)
+            self.action_delete_user.setEnabled(True)
+
+    def update_menu_actions_for_context(self):
+        """Mengubah teks dan status aksi pada menu tiga titik berdasarkan konteks."""
+        if self.user['role'] != 'technician':
+            return # Hanya berlaku untuk teknisi
+
+        if self.current_conversation:
+            # Konteks: Ada percakapan yang dipilih
+            conv_data = self._get_current_selected_conversation_data()
+            if conv_data and conv_data.get('employee_name'):
+                employee_name = conv_data['employee_name']
+                self.action_edit_user.setText(f"Edit Employee '{employee_name}'")
+                self.action_delete_user.setText(f"Hapus Employee '{employee_name}'")
+                self.action_edit_user.setEnabled(True)
+                self.action_delete_user.setEnabled(True)
+            else:
+                # Fallback jika data tidak lengkap
+                self.action_edit_user.setText("Edit User...")
+                self.action_delete_user.setText("Hapus User...")
+                self.action_edit_user.setEnabled(False)
+                self.action_delete_user.setEnabled(False)
+        else:
+            # Konteks: Tidak ada percakapan yang dipilih
+            self.action_edit_user.setText("Edit Staff (Technician/GA)...")
+            self.action_delete_user.setText("Hapus Staff (Technician/GA)...")
+            self.action_edit_user.setEnabled(True)
+            self.action_delete_user.setEnabled(True)
+
 
     def filter_conversations(self, text):
         search_text = text.lower().strip() # Teks pencarian, lowercase, dan hapus spasi di awal/akhir
@@ -923,6 +971,78 @@ class ChatWindow(QWidget):
                 # Jika tidak ada widget atau conversation_data, defaultnya tampilkan saja
                 # atau sembunyikan jika ada teks pencarian (tergantung preferensi)
                 item.setHidden(bool(search_text)) 
+
+    def open_manage_support_dialog(self, mode):
+        print(f"DEBUG: Membuka dialog untuk mengelola support staff (mode: {mode}).")
+        
+        # Kirim mode dan ID user saat ini untuk validasi (misal, tidak bisa hapus diri sendiri)
+        dialog = ManageSupportDialog(mode, self.user['id'], self) 
+        
+        if dialog.exec_() == QDialog.Accepted:
+            selected_user = dialog.get_selected_user_data()
+            if not selected_user:
+                QMessageBox.warning(self, "Tidak Ada Pilihan", "Anda belum memilih user.")
+                return
+
+            if mode == 'edit':
+                updated_data = dialog.get_edit_form_data()
+                # Panggil metode pemrosesan untuk edit
+                self.process_edit_support_user(selected_user['id'], updated_data)
+            elif mode == 'delete':
+                # Panggil metode pemrosesan untuk hapus
+                self.process_delete_support_user(selected_user)
+        else:
+            print(f"DEBUG: Dialog manajemen support staff (mode: {mode}) dibatalkan.")
+    
+    # Metode proses ini adalah placeholder, logika sesungguhnya perlu endpoint di server
+    def process_edit_support_user(self, user_id, updated_data):
+        print(f"DEBUG: Mengirim update untuk user ID {user_id} dengan data: {updated_data}")
+        try:
+            response = requests.put(f"{BASE_URL}/update_support_user/{user_id}", json=updated_data)
+            response_data = response.json()
+
+            if response.status_code == 200 and response_data.get('success'):
+                QMessageBox.information(self, "Sukses", response_data.get('message', 'User berhasil diupdate.'))
+                # Tidak perlu refresh apa pun karena tidak ada yang berubah di UI utama
+            else:
+                QMessageBox.critical(self, "Gagal Update", response_data.get('message', f'Error: {response.status_code}'))
+
+        except requests.exceptions.RequestException as e:
+            QMessageBox.critical(self, "Error Koneksi", f"Tidak bisa terhubung ke server: {e}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Terjadi kesalahan: {e}")
+
+
+    def process_delete_support_user(self, user_to_delete):
+        user_id = user_to_delete['id']
+        user_name = user_to_delete['full_name']
+        reply = QMessageBox.warning(self, 
+                                    f"Konfirmasi Hapus User: {user_name}",
+                                    f"Apakah Anda yakin ingin menghapus user '{user_name}' (ID: {user_id}) secara permanen?\n\n"
+                                    f"PERHATIAN:\n"
+                                    f"- SEMUA percakapan yang melibatkan user ini akan dihapus.\n"
+                                    f"- SEMUA pesan di dalam percakapan tersebut juga akan dihapus.\n"
+                                    f"- Tindakan ini TIDAK DAPAT DIURUNGKAN!",
+                                    QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
+
+        
+        if reply == QMessageBox.Yes:
+            print(f"DEBUG: Mengirim permintaan hapus untuk support staff ID {user_id} ({user_name})")
+            try:
+                response = requests.delete(f"{BASE_URL}/delete_support_user/{user_id}")
+                response_data = response.json()
+
+                if response.status_code == 200 and response_data.get('success'):
+                    QMessageBox.information(self, "Sukses", response_data.get('message', 'User berhasil dihapus.'))
+                    # Muat ulang percakapan jika penghapusan staff mempengaruhi tampilan
+                    self.load_conversations() 
+                else:
+                    QMessageBox.critical(self, "Gagal Menghapus", response_data.get('message', f'Error: {response.status_code}'))
+            
+            except requests.exceptions.RequestException as e:
+                QMessageBox.critical(self, "Error Koneksi", f"Tidak bisa terhubung ke server: {e}")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Terjadi kesalahan: {e}")
 
     def update_chat_input_active_state(self, active: bool):
         """Mengatur status aktif/nonaktif untuk area input pesan."""
@@ -1124,24 +1244,54 @@ class ChatWindow(QWidget):
                 QMessageBox.critical(self, "Error", f"An unexpected error occurred: {e_generic}")
 
     def handle_edit_user_action(self):
-        if not self.current_conversation:
-            QMessageBox.information(self, "Info", "Tidak ada percakapan yang dipilih untuk mengidentifikasi user.")
-            return
-        # Dapatkan employee_id dari percakapan saat ini untuk diedit
-        # (Asumsi teknisi mengedit employee)
-        conv_data = self._get_current_selected_conversation_data()
-        if not conv_data or self.user['role'] != 'technician':
-            QMessageBox.warning(self, "Error", "Tidak bisa mengidentifikasi user Employee dari percakapan ini, atau Anda bukan Teknisi.")
-            return
-            
-        employee_id_to_edit = conv_data.get('employee_id')
-        employee_name = conv_data.get('employee_name')
-        print(f"DEBUG: Aksi Edit User untuk Employee ID: {employee_id_to_edit} ({employee_name})")
-        QMessageBox.information(self, "Info", f"Fitur edit user {employee_name} (ID: {employee_id_to_edit}) belum diimplementasikan.")
+        if self.current_conversation:
+            # --- LOGIKA BARU UNTUK EDIT EMPLOYEE ---
+            conv_data = self._get_current_selected_conversation_data()
+            if not conv_data or not conv_data.get('employee_id'):
+                QMessageBox.warning(self, "Error", "Tidak bisa mengidentifikasi data Employee dari percakapan ini.")
+                return
+
+            employee_data = {
+                'id': conv_data.get('employee_id'),
+                'full_name': conv_data.get('employee_name'),
+                'username': conv_data.get('employee_username') # Data ini dari modifikasi server
+            }
+
+            dialog = EditEmployeeDialog(employee_data, self)
+            if dialog.exec_() == QDialog.Accepted:
+                updated_data = dialog.get_data()
+                print(f"DEBUG: ChatWindow - Mengirim update untuk employee ID {employee_data['id']} dengan data: {updated_data}")
+                if not updated_data:
+                    return # Dialog sudah menampilkan error
+
+                try:
+                    response = requests.put(f"{BASE_URL}/update_employee/{employee_data['id']}", json=updated_data)
+                    response_data = response.json()
+
+                    if response.status_code == 200 and response_data.get('success'):
+                        QMessageBox.information(self, "Sukses", response_data.get('message', "Data employee berhasil diupdate."))
+                        # Refresh list percakapan untuk menampilkan nama baru
+                        self.load_conversations()
+                    else:
+                        QMessageBox.critical(self, "Gagal Update", response_data.get('message', f"Error: {response.status_code}"))
+                
+                except requests.exceptions.RequestException as e:
+                    QMessageBox.critical(self, "Error Koneksi", f"Tidak bisa terhubung ke server: {e}")
+
+        else:
+            # Logika yang sudah ada: buka dialog untuk edit staff
+            self.open_manage_support_dialog(mode='edit')
+
 
 
     def handle_delete_user_action_from_menu(self):
         print("DEBUG: ChatWindow - Aksi 'Hapus User Ini' dari menu dipicu.")
+        if self.current_conversation:
+            self._handle_delete_employee_from_conversation() # Contoh refactor
+        else:
+            self.open_manage_support_dialog(mode='delete')
+            
+    def _handle_delete_employee_from_conversation(self):
         if not self.current_conversation:
             QMessageBox.information(self, "Info", "Tidak ada percakapan yang dipilih untuk mengidentifikasi user.")
             return
@@ -1221,6 +1371,8 @@ class ChatWindow(QWidget):
                 QMessageBox.critical(self, "Error", f"Terjadi kesalahan tak terduga: {e_general}")
         else:
             print(f"DEBUG: ChatWindow - Pengguna membatalkan penghapusan user ID: {user_id_to_delete}")
+
+
 
     # Metode helper _get_current_selected_conversation_data() (jika belum ada atau berbeda)
     # Pastikan metode ini ada dan berfungsi untuk mengambil conv_data dari item yang dipilih.
@@ -1360,7 +1512,6 @@ class ChatWindow(QWidget):
                     can_manage_employee = bool(self.user['role'] == 'technician' and employee_id_in_conv)
                     self.action_edit_user.setEnabled(can_manage_employee)
                     self.action_delete_user.setEnabled(can_manage_employee)
-                    self.action_delete_conversation.setEnabled(True) # Selalu bisa hapus conversation aktif
                 else:
                     self.chat_options_button.hide() # Sembunyikan jika tidak ada percakapan
 
@@ -1393,6 +1544,8 @@ class ChatWindow(QWidget):
         conversation_id = item.data(Qt.UserRole)
         print(f"DEBUG: ChatWindow - Memilih percakapan ID: {conversation_id}") # DEBUG
         self.current_conversation = conversation_id
+        self.update_menu_actions_for_context() # PANGGIL DI SINI
+
         QTimer.singleShot(100, self.scroll_to_bottom)
         conv_widget = self.conversation_list.itemWidget(item)
         if not conv_widget:
@@ -1464,6 +1617,7 @@ class ChatWindow(QWidget):
 
         # 4. Nonaktifkan area input pesan
         self.update_chat_input_active_state(False)
+        self.update_menu_actions_for_context() # PANGGIL DI SINI
 
         # 5. (Opsional) Hapus sorotan dari QListWidget jika ada
         if self.conversation_list.currentItem():
@@ -1942,7 +2096,206 @@ class CreateConversationDialog(QDialog):
         }
 
 # ... (sisa kelas WebSocketThread, BubbleMessage, ConversationItem, dll.) ...
+
+class ManageSupportDialog(QDialog):
+    def __init__(self, mode, current_technician_id, parent=None):
+        super().__init__(parent)
+        self.mode = mode # 'edit' atau 'delete'
+        self.current_technician_id = current_technician_id # ID teknisi yang sedang login
+        self.support_staff_list = [] # Untuk menyimpan data user dari server
+        self.technician_count = 0 # Untuk validasi agar teknisi terakhir tidak bisa dihapus
+
+        if self.mode == 'edit':
+            self.setWindowTitle("Edit Technician/GA")
+            self.setFixedSize(450, 300)
+        else: # delete
+            self.setWindowTitle("Hapus Technician/GA")
+            self.setFixedSize(250, 150)
+
+        self.setStyleSheet("font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;")
         
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # Dropdown untuk memilih user
+        self.user_label = QLabel("Pilih User (Technician/GA):")
+        self.user_combo = QComboBox()
+        self.user_combo.setPlaceholderText("Mengambil data...")
+        layout.addWidget(self.user_label)
+        layout.addWidget(self.user_combo)
+
+        # Grup untuk field edit (hanya tampil di mode edit)
+        self.edit_group_box = QWidget()
+        edit_layout = QVBoxLayout(self.edit_group_box)
+        edit_layout.setContentsMargins(0, 10, 0, 0)
+        
+        self.fullname_input = QLineEdit()
+        self.fullname_input.setPlaceholderText("Nama Lengkap")
+        edit_layout.addWidget(QLabel("Nama Lengkap:"))
+        edit_layout.addWidget(self.fullname_input)
+        
+        self.nik_input = QLineEdit()
+        self.nik_input.setPlaceholderText("Email")
+        edit_layout.addWidget(QLabel("Email:"))
+        edit_layout.addWidget(self.nik_input)
+        
+        self.password_input = QLineEdit()
+        self.password_input.setPlaceholderText("Password Baru (opsional)")
+        self.password_input.setEchoMode(QLineEdit.Password)
+        edit_layout.addWidget(QLabel("Password Baru (kosongkan jika tidak diubah):"))
+        edit_layout.addWidget(self.password_input)
+        
+        layout.addWidget(self.edit_group_box)
+
+        layout.addStretch(1)
+
+        # Tombol Aksi
+        self.action_button = QPushButton() # Teks diatur berdasarkan mode
+        self.cancel_button = QPushButton("Batal")
+
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        button_layout.addWidget(self.cancel_button)
+        button_layout.addWidget(self.action_button)
+        layout.addLayout(button_layout)
+
+        # Atur UI berdasarkan mode
+        if self.mode == 'edit':
+            self.action_button.setText("💾 Simpan Perubahan")
+            self.action_button.setEnabled(False) # Awalnya nonaktif
+        else: # delete
+            self.action_button.setText("🗑️ Hapus User Ini")
+            self.edit_group_box.hide() # Sembunyikan field edit di mode hapus
+            self.action_button.setEnabled(False) # Awalnya nonaktif
+
+        # Koneksi sinyal
+        self.user_combo.currentIndexChanged.connect(self.on_user_selected)
+        self.action_button.clicked.connect(self.accept) # Terima dialog saat tombol aksi diklik
+        self.cancel_button.clicked.connect(self.reject)
+
+        self._load_support_staff() # Panggil untuk mengisi dropdown
+
+    def _load_support_staff(self):
+        try:
+            # Kita akan buat endpoint ini di Langkah 2
+            response = requests.get(f"{BASE_URL}/get_support_staff")
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('success'):
+                    self.support_staff_list = data.get('users', [])
+                    self.technician_count = data.get('technician_count', 0)
+                    
+                    self.user_combo.clear()
+                    self.user_combo.addItem("-- Pilih User --", userData=None)
+                    for user in self.support_staff_list:
+                        display_name = user['full_name']
+                        if user['id'] == self.current_technician_id:
+                            display_name += " (Anda)"
+                        self.user_combo.addItem(display_name, userData=user)
+                else:
+                    self.user_combo.addItem("Gagal memuat data", userData=None)
+            else:
+                self.user_combo.addItem("Error server", userData=None)
+        except requests.exceptions.RequestException as e:
+            self.user_combo.addItem("Error koneksi", userData=None)
+            print(f"Error memuat support staff: {e}")
+
+    def on_user_selected(self, index):
+        selected_data = self.user_combo.itemData(index)
+        if not selected_data:
+            # Jika "-- Pilih User --" yang dipilih
+            self.action_button.setEnabled(False)
+            if self.mode == 'edit':
+                self.fullname_input.clear()
+                self.password_input.clear()
+            return
+        
+        self.action_button.setEnabled(True)
+        
+        if self.mode == 'edit':
+            self.fullname_input.setText(selected_data.get('full_name', ''))
+            self.nik_input.setText(selected_data.get('username', '')) # Asumsi username adalah NIK
+            self.password_input.clear() # Selalu kosongkan field password
+        
+        elif self.mode == 'delete':
+            # Aturan pengaman: Jangan biarkan teknisi terakhir dihapus
+            is_technician = selected_data.get('role') == 'technician'
+            is_last_technician = (self.technician_count <= 1)
+            
+            if is_technician and is_last_technician:
+                self.action_button.setEnabled(False)
+                self.action_button.setToolTip("Tidak bisa menghapus teknisi terakhir.")
+            else:
+                self.action_button.setEnabled(True)
+                self.action_button.setToolTip("")
+                
+            if selected_data.get('id') == self.current_technician_id:
+                self.action_button.setEnabled(False)
+                self.action_button.setToolTip("Anda tidak bisa menghapus diri sendiri.")
+
+    def get_selected_user_data(self):
+        return self.user_combo.currentData()
+    
+    def get_edit_form_data(self):
+        data = { "full_name": self.fullname_input.text().strip() }
+        if self.password_input.text():
+            data["password"] = self.password_input.text()
+        return data
+    
+class EditEmployeeDialog(QDialog):
+    def __init__(self, employee_data, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Edit Employee Data")
+        self.setFixedSize(400, 400)
+        self.setStyleSheet("font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;")
+
+        self.employee_id = employee_data.get('id')
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # Username (NIK) - Dibuat read-only karena NIK biasanya tidak boleh diubah
+        self.username_label = QLabel("Nomor Induk Karyawan:")
+        self.username_input = QLineEdit()
+        self.username_input.setText(employee_data.get('username', 'N/A'))
+        layout.addWidget(self.username_label)
+        layout.addWidget(self.username_input)
+
+        # Full Name
+        self.fullname_label = QLabel("Full Name:")
+        self.fullname_input = QLineEdit()
+        self.fullname_input.setPlaceholderText("Enter full name")
+        self.fullname_input.setText(employee_data.get('full_name', '')) # Isi dengan nama saat ini
+        layout.addWidget(self.fullname_label)
+        layout.addWidget(self.fullname_input)
+
+        layout.addStretch(1)
+
+        # Buttons
+        button_layout = QHBoxLayout()
+        self.update_button = QPushButton("💾 Update Data")
+        self.cancel_button = QPushButton("Batal")
+        
+        button_layout.addStretch()
+        button_layout.addWidget(self.cancel_button)
+        button_layout.addWidget(self.update_button)
+        layout.addLayout(button_layout)
+
+        self.update_button.clicked.connect(self.accept)
+        self.cancel_button.clicked.connect(self.reject)
+
+    def get_data(self):
+        """Mengembalikan data yang diubah dari form."""
+        full_name = self.fullname_input.text().strip()
+        if not full_name:
+            QMessageBox.warning(self, "Input Error", "Nama Lengkap tidak boleh kosong.")
+            return None
+        return {"full_name": full_name}
+
+
+
 class AddUserDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1950,7 +2303,7 @@ class AddUserDialog(QDialog):
         self.setFixedSize(400, 320) # Sedikit lebih tinggi untuk spasi
 
         layout = QVBoxLayout(self)
-        layout.setSpacing(12) # Kurangi spacing sedikit
+        layout.setSpacing(10) # Kurangi spacing sedikit
         layout.setContentsMargins(20, 20, 20, 20)
 
         # Username
@@ -2006,22 +2359,44 @@ class AddUserDialog(QDialog):
         """)
 
         button_layout.addStretch()
-        button_layout.addWidget(self.ok_button)
         button_layout.addWidget(self.cancel_button)
+        button_layout.addWidget(self.ok_button)
         layout.addLayout(button_layout)
 
-        self.ok_button.clicked.connect(self.accept)
+        self.ok_button.clicked.connect(self.accept_data)
         self.cancel_button.clicked.connect(self.reject)
         
-        self.role_combo.currentIndexChanged.connect(self.update_password_prompt) # Hubungkan sinyal
-        self.update_password_prompt() # Panggil sekali saat inisialisasi
+        self.role_combo.currentIndexChanged.connect(self.update_password_visibility) # Hubungkan sinyal
+        self.update_password_visibility() # Panggil sekali saat inisialisasi
 
-    def update_password_prompt(self):
+    def update_password_visibility(self): # Ganti nama metode
         current_role = self.role_combo.currentText()
         if current_role == 'employee':
-            self.password_label.setText("Password (Optional for Employee):")
-        else: # technician
-            self.password_label.setText("Password (Required for Technician):")
+            # self.password_label.setText("Password (Opsional untuk Employee):") # Teks bisa tetap ada
+            # self.password_input.setPlaceholderText("Biarkan kosong jika tidak ada password")
+            # self.password_input.setVisible(True) # Tetap visible, tapi opsional
+            # Jika ingin benar-benar menyembunyikan:
+            self.password_label.setVisible(False)
+            self.password_input.setVisible(False)
+        else: # technician atau ga
+            self.password_label.setText(f"Password (Wajib untuk {current_role.title()}):")
+            self.password_input.setPlaceholderText("Masukkan password")
+            self.password_label.setVisible(True)
+            self.password_input.setVisible(True)
+            
+    def accept_data(self): # Metode baru untuk validasi sebelum accept
+        # Validasi dasar
+        if not self.username_input.text().strip() or not self.fullname_input.text().strip():
+            QMessageBox.warning(self, "Input Error", "Username dan Nama Lengkap tidak boleh kosong.")
+            return
+
+        current_role = self.role_combo.currentText()
+        if current_role in ['technician', 'ga'] and not self.password_input.text():
+            QMessageBox.warning(self, "Input Error", f"Password wajib diisi untuk peran {current_role.title()}.")
+            return
+        
+        self.accept() # Jika validasi lolos, tutup dialog dengan status Accepted
+
 
     def get_data(self):
         return {
