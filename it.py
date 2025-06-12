@@ -22,7 +22,7 @@ from PyQt5.QtGui import QColor,QKeyEvent, QFont, QPainter, QBrush, QPalette, QPi
 # Suppress font warnings
 os.environ['QT_LOGGING_RULES'] = 'qt.qpa.fonts=false'
 
-IP = "192.168.47.190"
+IP = "192.168.46.252"
 # IP = "192.168.1.7"
 PORT = "5000"
 
@@ -1954,9 +1954,9 @@ class AddUserDialog(QDialog):
         layout.setContentsMargins(20, 20, 20, 20)
 
         # Username
-        self.username_label = QLabel("Username:")
+        self.username_label = QLabel("Nomor Induk Pegawai:")
         self.username_input = QLineEdit()
-        self.username_input.setPlaceholderText("Enter username")
+        self.username_input.setPlaceholderText("Enter NIK")
         layout.addWidget(self.username_label)
         layout.addWidget(self.username_input)
 

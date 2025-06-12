@@ -13,7 +13,7 @@ from werkzeug.utils import secure_filename
 from flask import Flask, request, jsonify, send_from_directory
 from apscheduler.schedulers.background import BackgroundScheduler
 
-IP = "192.168.47.190"
+IP = "192.168.46.252"
 # IP = "192.168.1.7"
 PORT = "5000"
 
