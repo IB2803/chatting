@@ -5,6 +5,7 @@ import json
 import threading
 import time
 import socketio
+import pandas as pd
 
 from PyQt5.QtMultimedia import QSoundEffect
 from PyQt5.QtWidgets import QFileDialog
@@ -22,8 +23,8 @@ from PyQt5.QtGui import QColor,QKeyEvent, QFont, QPainter, QBrush, QPalette, QPi
 # Suppress font warnings
 os.environ['QT_LOGGING_RULES'] = 'qt.qpa.fonts=false'
 
-IP = "192.168.46.252"
-# IP = "192.168.1.7"
+IP = "192.168.29.125"
+# IP = "192.168.1.5"
 PORT = "5000"
 
 # BASE_URL = "http://localhost:5000"
@@ -431,7 +432,7 @@ class ChatWindow(QWidget):
 
         
     def setup_ui(self):
-        self.setWindowTitle(f"IT Chat - {self.user['full_name']} ({self.user['role'].title()})")
+        self.setWindowTitle(f"IT Chat (Teknisi) - {self.user['full_name']} ({self.user['role'].title()})")
         self.resize(1200, 800)
         
         # Main layout
@@ -589,9 +590,29 @@ class ChatWindow(QWidget):
             self.add_contact_btn.clicked.connect(self.handle_add_contact_click) # Handler baru
             sidebar_layout.addWidget(self.add_contact_btn)
             
+            
+            # self.add_contact_btn.clicked.connect(self.handle_add_contact_click) # Handler baru
+            # sidebar_layout.addWidget(self.add_contact_btn)
+
+                # --- TAMBAHKAN KODE DI BAWAH INI ---
+            # self.bulk_add_btn = QPushButton("👥 Bulk Add from File")
+            # self.bulk_add_btn.setStyleSheet("""
+            #     QPushButton {
+            #         background-color: #FD7E14; /* Warna oranye sebagai pembeda */
+            #         color: white; border: none;
+            #         padding: 10px; border-radius: 18px; font-size: 13px;
+            #         font-weight: 500; margin: 5px 20px 17px 20px; /* Atur margin bawah */
+            #     }
+            #     QPushButton:hover { background-color: #E86A0C; }1
+            #     QPushButton:pressed { background-color: #D35400; }
+            # """)
+            # self.bulk_add_btn.setToolTip("Add multiple users from a CSV or Excel file")
+            # self.bulk_add_btn.clicked.connect(self.handle_bulk_add_click) # Handler baru
+            # sidebar_layout.addWidget(self.bulk_add_btn)
         chat_header_layout = QHBoxLayout()
         chat_header_layout.setContentsMargins(24, 15, 24, 20) 
         # Spacer kiri (untuk atur posisi tombol ke kanan jika mau)
+
       
         #  Tombol "Back" untuk kembali ke daftar percakapan
         self.back_button = QPushButton("←") # Atau gunakan QIcon jika punya ikon panah
@@ -1117,6 +1138,7 @@ class ChatWindow(QWidget):
         # Namun, menangani event secara spesifik lebih efisien
     def handle_add_contact_click(self):
         dialog = AddUserDialog(self) # Menggunakan dialog yang sama
+        dialog = AddUserDialog(parent_window=self, parent=self)
         if dialog.exec_() == QDialog.Accepted:
             user_data = dialog.get_data()
 
@@ -1979,8 +2001,78 @@ class ChatWindow(QWidget):
         print("DEBUG: ChatWindow - Accepting close event to close and destroy current ChatWindow.")
         event.accept()
         # super().closeEvent(event) # bisa juga digunakan sebagai alternatif event.accept()
-                                 # jika ada logika closeEvent di parent class QWidget yang ingin dijalankan.
-                                 # Untuk kasus umum, event.accept() cukup.
+        # jika ada logika closeEvent di parent class QWidget yang ingin dijalankan.
+        # Untuk kasus umum, event.accept() cuk
+        
+    # def handle_bulk_add_click(self):
+    #     """Membuka dialog untuk memilih file CSV/XLSX."""
+    #     options = QFileDialog.Options()
+    #     file_path, _ = QFileDialog.getOpenFileName(
+    #         self, 
+    #         "Select User File for Bulk Upload", 
+    #         "", # Direktori awal
+    #         "Spreadsheet Files (*.csv *.xlsx *.xls);;All Files (*)", # Filter file
+    #         options=options
+    #     )
+        
+    #     if file_path:
+    #         self.upload_user_file(file_path)
+
+    # def upload_user_file(self, file_path):
+    #     """Mengirim file yang dipilih ke server untuk diproses."""
+    #     url = f"{BASE_URL}/bulk_add_users"
+    #     try:
+    #         with open(file_path, 'rb') as f:
+    #             files = {'file': (os.path.basename(file_path), f)}
+                
+    #             # Tampilkan pesan tunggu
+    #             msg_box = QMessageBox()
+    #             msg_box.setWindowTitle("Processing")
+    #             msg_box.setText("Uploading and processing file... Please wait.")
+    #             msg_box.setStandardButtons(QMessageBox.NoButton) # Tanpa tombol
+    #             msg_box.show()
+    #             QApplication.processEvents() # Paksa UI update
+
+    #             response = requests.post(url, files=files, timeout=300) # Timeout 5 menit
+                
+    #             msg_box.close() # Tutup pesan tunggu
+
+    #         if response.status_code == 200:
+    #             response_data = response.json()
+    #             details = response_data.get('details', {})
+    #             # Buat pesan ringkasan yang lebih detail
+    #             summary_text = (
+    #                 f"<b>Bulk Add Complete!</b><br><br>"
+    #                 f"Successfully Added: {details.get('added', 0)}<br>"
+    #                 f"Skipped (Duplicates): {details.get('skipped_duplicates', 0)}<br>"
+    #                 f"Rows with Errors: {details.get('errors', 0)}"
+    #             )
+                
+    #             info_box = QMessageBox()
+    #             info_box.setIcon(QMessageBox.Information)
+    #             info_box.setWindowTitle("Bulk Add Summary")
+    #             info_box.setText(summary_text)
+                
+    #             # Jika ada error, tampilkan di detail
+    #             if details.get('error_list'):
+    #                 error_details = "\n".join(details['error_list'])
+    #                 info_box.setDetailedText(error_details)
+
+    #             info_box.exec_()
+    #             self.load_conversations() # Refresh daftar percakapan
+    #         else:
+    #             error_msg = f"Failed to process file. Server responded with status {response.status_code}."
+    #             try:
+    #                 error_msg += f"\nMessage: {response.json().get('message', response.text)}"
+    #             except:
+    #                 error_msg += f"\nResponse: {response.text}"
+    #             QMessageBox.critical(self, "Upload Failed", error_msg)
+
+    #     except requests.exceptions.RequestException as e:
+    #         QMessageBox.critical(self, "Connection Error", f"Could not connect to server: {e}")
+    #     except Exception as e:
+    #         QMessageBox.critical(self, "Error", f"An unexpected error occurred: {e}")
+                            
 
 # ... (impor lain yang sudah ada: QDialog, QVBoxLayout, QLabel, QComboBox, QPushButton, QMessageBox, requests) ...
 
@@ -2297,8 +2389,9 @@ class EditEmployeeDialog(QDialog):
 
 
 class AddUserDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self,parent_window, parent=None):
         super().__init__(parent)
+        self.parent_window = parent_window
         self.setWindowTitle("Add New User")
         self.setFixedSize(400, 320) # Sedikit lebih tinggi untuk spasi
 
@@ -2309,7 +2402,7 @@ class AddUserDialog(QDialog):
         # Username
         self.username_label = QLabel("Nomor Induk Pegawai:")
         self.username_input = QLineEdit()
-        self.username_input.setPlaceholderText("Enter NIK")
+        self.username_input.setPlaceholderText("Enter NIK (Nomor Induk Pegawai)")
         layout.addWidget(self.username_label)
         layout.addWidget(self.username_input)
 
@@ -2357,8 +2450,23 @@ class AddUserDialog(QDialog):
             }
             QPushButton:hover { background-color: #D0D0D0; }
         """)
+        
+        self.bulk_add_btn = QPushButton("👥 Bulk Add from File")
+        self.bulk_add_btn.setStyleSheet("""
+            QPushButton {
+               background-color: #E0E0E0; color: #333333; padding: 10px;
+                border-radius: 5px;
+            }
+            QPushButton:hover { background-color: #D0D0D0; }
+        """)
+        self.bulk_add_btn.setToolTip("Add multiple users from a CSV or Excel file")
+        self.bulk_add_btn.clicked.connect(self.handle_bulk_add_click) # Handler baru
+            
+        # chat_header_layout = QHBoxLayout()
+        # chat_header_layout.setContentsMargins(24, 15, 24, 20) 
 
         button_layout.addStretch()
+        button_layout.addWidget(self.bulk_add_btn) # Tambahkan tombol bulk add
         button_layout.addWidget(self.cancel_button)
         button_layout.addWidget(self.ok_button)
         layout.addLayout(button_layout)
@@ -2368,7 +2476,150 @@ class AddUserDialog(QDialog):
         
         self.role_combo.currentIndexChanged.connect(self.update_password_visibility) # Hubungkan sinyal
         self.update_password_visibility() # Panggil sekali saat inisialisasi
+        
+            # self.add_contact_btn.clicked.connect(self.handle_add_contact_click) # Handler baru
+            # sidebar_layout.addWidget(self.add_contact_btn)
 
+                # --- TAMBAHKAN KODE DI BAWAH INI ---
+        
+        
+
+    def handle_bulk_add_click(self):
+        """Membuka dialog untuk memilih file CSV/XLSX."""
+        options = QFileDialog.Options()
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, 
+            "Select User File for Bulk Upload", 
+            "", # Direktori awal
+            "Spreadsheet Files (*.csv *.xlsx *.xls);;All Files (*)", # Filter file
+            options=options
+        )
+        
+        if file_path:
+            self.upload_user_file(file_path)
+
+    def upload_user_file(self, file_path):
+        """Mengirim file yang dipilih ke server untuk diproses."""
+        url = f"{BASE_URL}/bulk_add_users"
+        try:
+            with open(file_path, 'rb') as f:
+                files = {'file': (os.path.basename(file_path), f)}
+                
+                # Tampilkan pesan tunggu
+                msg_box = QMessageBox()
+                msg_box.setWindowTitle("Processing")
+                msg_box.setText("Uploading and processing file... Please wait.")
+                msg_box.setStandardButtons(QMessageBox.NoButton) # Tanpa tombol
+                msg_box.show()
+                QApplication.processEvents() # Paksa UI update
+
+                response = requests.post(url, files=files, timeout=300) # Timeout 5 menit
+                
+                msg_box.close() # Tutup pesan tunggu
+
+            if response.status_code == 200:
+                response_data = response.json()
+                details = response_data.get('details', {})
+                # Buat pesan ringkasan yang lebih detail
+                summary_text = (
+                    f"<b>Bulk Add Complete!</b><br><br>"
+                    f"Successfully Added: {details.get('added', 0)}<br>"
+                    f"Skipped (Duplicates): {details.get('skipped_duplicates', 0)}<br>"
+                    f"Rows with Errors: {details.get('errors', 0)}"
+                )
+                
+                info_box = QMessageBox()
+                info_box.setIcon(QMessageBox.Information)
+                info_box.setWindowTitle("Bulk Add Summary")
+                info_box.setText(summary_text)
+                
+                # Jika ada error, tampilkan di detail
+                if details.get('error_list'):
+                    error_details = "\n".join(details['error_list'])
+                    info_box.setDetailedText(error_details)
+
+                info_box.exec_()
+                self.parent_window.load_conversations() # Refresh daftar percakapan
+            else:
+                error_msg = f"Failed to process file. Server responded with status {response.status_code}."
+                try:
+                    error_msg += f"\nMessage: {response.json().get('message', response.text)}"
+                except:
+                    error_msg += f"\nResponse: {response.text}"
+                QMessageBox.critical(self, "Upload Failed", error_msg)
+
+        except requests.exceptions.RequestException as e:
+            QMessageBox.critical(self, "Connection Error", f"Could not connect to server: {e}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"An unexpected error occurred: {e}")
+ 
+    def load_conversations(self):
+        print(f"DEBUG: Memuat percakapan untuk user {self.user['id']}")
+        
+        try: 
+            response = requests.get(f"{BASE_URL}/get_conversations/{self.user['id']}")
+            print(f"DEBUG: ChatWindow - Status load_conversations: {response.status_code}") # DEBUG
+            QTimer.singleShot(100, self.scroll_to_bottom)
+            if response.status_code == 200:
+                try:
+                    conversations = response.json()
+                    print(f"DEBUG: ChatWindow - Percakapan diterima (raw): {conversations}") # DEBUG
+                except requests.exceptions.JSONDecodeError:
+                    print(f"DEBUG: ChatWindow - Gagal parse JSON dari /get_conversations: {response.text}") # DEBUG
+                    conversations = []
+                
+                self.conversation_list.clear() # Hapus item lama
+                
+                if not conversations:
+                    print("DEBUG: ChatWindow - Tidak ada percakapan.") # DEBUG
+                    return
+                
+                conversations.sort(key=lambda x: str(x.get('last_updated', '0')), reverse=True) # Gunakan last_updated dari server
+
+
+                for conv_data in conversations:
+                    print(f"DEBUG: ChatWindow - Memproses conv ID: {conv_data.get('id')}") # DEBUG
+                    item = QListWidgetItem()
+                    item.setData(Qt.UserRole, conv_data['id'])
+                    
+                    # Ambil 'last_message_preview' dari conv_data (HARUS DISEDIAKAN SERVER)
+                    last_message_preview = conv_data.get('last_message_preview', "No messages yet.")
+                    if not last_message_preview:
+                         last_message_preview = "No messages yet."
+                    print(f"DEBUG: ChatWindow - Last message untuk conv {conv_data.get('id')}: {last_message_preview}") #DEBUG
+                                    
+                    conv_widget = ConversationItem(conv_data, self.user['role'], last_message_preview)
+                    item.setSizeHint(conv_widget.sizeHint())
+                    
+                    self.conversation_list.addItem(item)
+                    self.conversation_list.setItemWidget(item, conv_widget)
+                    
+                    if self.unread_map.get(conv_data['id'], False) and conv_data['id'] != self.current_conversation:
+                        self.mark_conversation_unread(conv_data['id'], last_message_preview)
+
+                    if conv_data['id'] == self.current_conversation:
+                        self.conversation_list.setCurrentItem(item)
+                    
+                    print(f"DEBUG: ChatWindow - Unread message: \n {self.unread_map}") # DEBUG
+                # print(f"DEBUG: ChatWindow - percakapan dimuat. List:\n {conversations}") # DEBUG
+                
+                if self.current_conversation:
+                    self.chat_options_button.show() # Tampilkan tombol jika ada percakapan dipilih
+                    # Anda mungkin ingin mengaktifkan/menonaktifkan aksi tertentu berdasarkan peran user atau status percakapan
+                    employee_id_in_conv = conv_data.get('employee_id')
+                    # Hanya aktifkan hapus/edit user jika ada employee_id dan user saat ini adalah teknisi
+                    can_manage_employee = bool(self.user['role'] == 'technician' and employee_id_in_conv)
+                    self.action_edit_user.setEnabled(can_manage_employee)
+                    self.action_delete_user.setEnabled(can_manage_employee)
+                else:
+                    self.chat_options_button.hide() # Sembunyikan jika tidak ada percakapan
+
+            else:
+                print(f"DEBUG: ChatWindow - Gagal memuat percakapan: {response.status_code} - {response.text}") # DEBUG
+        except requests.exceptions.RequestException as e:
+            print(f"DEBUG: Error koneksi saat memuat percakapan: {e}")
+        except Exception as e:
+            print(f"DEBUG: Error tak terduga di load_conversations: {e}")
     def update_password_visibility(self): # Ganti nama metode
         current_role = self.role_combo.currentText()
         if current_role == 'employee':
@@ -2414,9 +2665,10 @@ class LoginWindow(QWidget):
         self.saved_accounts = [] # Untuk menyimpan daftar akun yang dimuat
         self.setup_ui()
         self.load_saved_accounts_to_combo() # Muat login yang tersimpan
+        self.load_saved_account()  
     
     def setup_ui(self):
-        self.setWindowTitle("Login - IT Chat")
+        self.setWindowTitle("Login - IT Chat (Teknisi)")
         # self.setFixedSize(480, 800)
         self.resize(480, 750)
         
@@ -2447,7 +2699,7 @@ class LoginWindow(QWidget):
         top_layout.addWidget(logo_label)
         
         # Title
-        title = QLabel("IT Chat")
+        title = QLabel("IT Chat (Teknisi)")
         title.setStyleSheet("""
             QLabel {
                 font-size: 28px; 
@@ -2752,6 +3004,24 @@ class LoginWindow(QWidget):
                 self.accounts_combo.addItem(account["username"], userData=account)
         
         self.accounts_combo.blockSignals(False) # Aktifkan kembali sinyal
+        
+    def load_saved_account(self):
+        """
+        Loads the single saved account from QSettings and populates the input fields.
+        """
+        # Read the single account data. Use a new key, e.g., "saved_single_account".
+        saved_account = self.settings.value("saved_single_account", None) 
+        
+        # Check if data exists and is a dictionary
+        if saved_account and isinstance(saved_account, dict):
+            print(f"DEBUG: Found saved account: {saved_account.get('username')}")
+            # Set the username and password fields
+            self.username_input.setText(saved_account.get("username", ""))
+            self.password_input.setText(saved_account.get("password", ""))
+            # Also, check the "Remember me" box since the data was saved
+            self.remember_me_checkbox.setChecked(True)
+        else:
+            print("DEBUG: No saved account found.")
 
     def on_account_selected_from_combo(self, index):
         if index <= 0: # Jika placeholder "-- Select a saved account --" yang dipilih
@@ -2793,34 +3063,69 @@ class LoginWindow(QWidget):
     #     except requests.exceptions.ConnectionError:
     #         self.show_error("Cannot connect to server. Please check your connection.")
     
+    # def handle_login(self):
+    #     print("DEBUG: handle_login called") # DEBUG
+    #     username = self.username_input.text()
+    #     password = self.password_input.text()
+        
+    #     if not username or not password:
+    #         print(f"DEBUG: Username entered: {username}") # DEBUG
+    #         print(f"DEBUG: Password entered: {password}") # DEBUG
+    #         self.show_error("Username and password are required")
+    #         return
+        
+    #     data = {'username': username, 'password': password} # Password dikirim ke server untuk di-hash & dicek
+        
+    #     try:
+    #         response = requests.post(f"{BASE_URL}/login_it", json=data) # Endpoint login IT
+    #         if response.status_code == 200:
+    #             result = response.json()
+    #             if result['success']:
+    #                 # Jika login berhasil dan "Remember me" dicentang
+    #                 self.chat_window = ChatWindow(result['user'])
+                    
+    #                 print(f"DEBUG: Login successful for user {username}. User data: {result['user']}") # DEBUG
+    #                 if self.remember_me_checkbox.isChecked():
+    #                     print(f"DEBUG: Saving account {username} to settings.") # DEBUG
+    #                     self.save_account_to_settings(username, password)
+    #                 self.chat_window.show()# Simpan password ASLI yang diketik pengguna
+    #                 self.close()
+                    
+    #             else:
+    #                 self.show_error(result.get('message', "Invalid username or password."))
+    #         else:
+    #             self.show_error(f"Server error: {response.status_code}. Please try again later.")
+    #     except requests.exceptions.ConnectionError:
+    #         self.show_error("Cannot connect to server. Please check your connection.")
+    #     except Exception as e:
+    #         self.show_error(f"An unexpected error occurred: {str(e)}")
     def handle_login(self):
-        print("DEBUG: handle_login called") # DEBUG
+        print("DEBUG: handle_login called")
         username = self.username_input.text()
         password = self.password_input.text()
         
         if not username or not password:
-            print(f"DEBUG: Username entered: {username}") # DEBUG
-            print(f"DEBUG: Password entered: {password}") # DEBUG
             self.show_error("Username and password are required")
             return
         
-        data = {'username': username, 'password': password} # Password dikirim ke server untuk di-hash & dicek
+        data = {'username': username, 'password': password}
         
         try:
-            response = requests.post(f"{BASE_URL}/login_it", json=data) # Endpoint login IT
+            response = requests.post(f"{BASE_URL}/login_it", json=data)
             if response.status_code == 200:
                 result = response.json()
                 if result['success']:
-                    # Jika login berhasil dan "Remember me" dicentang
-                    self.chat_window = ChatWindow(result['user'])
-                    
-                    print(f"DEBUG: Login successful for user {username}. User data: {result['user']}") # DEBUG
+                    # Logic to save or clear the account
                     if self.remember_me_checkbox.isChecked():
-                        print(f"DEBUG: Saving account {username} to settings.") # DEBUG
-                        self.save_account_to_settings(username, password)
-                    self.chat_window.show()# Simpan password ASLI yang diketik pengguna
-                    self.close()
+                        # If "Remember me" is checked, save the credentials.
+                        self.save_single_account(username, password)
+                    else:
+                        # If it's not checked, clear any previously saved credentials.
+                        self.clear_single_account()
                     
+                    self.chat_window = ChatWindow(result['user'])
+                    self.chat_window.show()
+                    self.close()
                 else:
                     self.show_error(result.get('message', "Invalid username or password."))
             else:
@@ -2829,7 +3134,21 @@ class LoginWindow(QWidget):
             self.show_error("Cannot connect to server. Please check your connection.")
         except Exception as e:
             self.show_error(f"An unexpected error occurred: {str(e)}")
-            
+
+    def save_single_account(self, username, password):
+        """Saves a single account's data to settings."""
+        print(f"DEBUG: Saving single account '{username}' to settings.")
+        account_data = {"username": username, "password": password}
+        # Use a new key for the single account
+        self.settings.setValue("saved_single_account", account_data)
+        self.settings.sync()
+
+    def clear_single_account(self):
+        """Clears the single saved account from settings."""
+        print("DEBUG: Clearing saved account from settings.")
+        self.settings.remove("saved_single_account")
+        self.settings.sync()
+  
     def save_account_to_settings(self, username, password_to_save):
         # PERINGATAN: Menyimpan password seperti ini tidak aman.
         # Ini hanya untuk kemudahan lokal dan demo.

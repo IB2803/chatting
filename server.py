@@ -6,14 +6,14 @@ from flask_mysqldb import MySQL
 from flask_socketio import SocketIO
 from flask_cors import CORS
 import hashlib
-
+import pandas as pd
 from datetime import datetime, timedelta
 import os
 from werkzeug.utils import secure_filename
 from flask import Flask, request, jsonify, send_from_directory
 from apscheduler.schedulers.background import BackgroundScheduler
 
-IP = "192.168.46.252"
+IP = "192.168.29.125"
 # IP = "192.168.1.7"
 PORT = "5000"
 
@@ -298,7 +298,7 @@ def delete_support_user(user_id):
         cur.execute("UPDATE conversations SET technician_id = NULL WHERE technician_id = %s", (user_id,))
         print(f"DEBUG: {cur.rowcount} percakapan yang ditangani oleh user {user_id} telah di-unassign.")
         
-        cur.execute("SELECT id FROM conversations WHERE employee_id = %s", (user_id))
+        cur.execute("SELECT id FROM conversations WHERE employee_id = %s", (user_id,))
         conversation_ids_tuples = cur.fetchall()
         conversation_ids_to_delete = [conv_tuple[0] for conv_tuple in conversation_ids_tuples]
         
@@ -882,6 +882,115 @@ def add_user():
             cur.close()
         print(f"Error adding user or creating conversations: {e}")
         return jsonify({'success': False, 'message': f'Database error: {str(e)}'}), 500
+
+@app.route('/bulk_add_users', methods=['POST'])
+def bulk_add_users():
+    # 1. Cek apakah ada file yang diunggah
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'message': 'Tidak ada bagian file dalam permintaan'}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'success': False, 'message': 'Tidak ada file yang dipilih'}), 400
+
+    # 2. Cek ekstensi file dan baca menggunakan pandas
+    try:
+        if file.filename.endswith('.csv'):
+            df = pd.read_csv(file)
+        elif file.filename.endswith(('.xls', '.xlsx')):
+            df = pd.read_excel(file)
+        else:
+            return jsonify({'success': False, 'message': 'Jenis file tidak didukung. Harap gunakan .csv atau .xlsx'}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Gagal membaca file: {str(e)}'}), 500
+
+    # 3. Proses setiap baris dalam DataFrame
+    cur = None
+    added_count = 0
+    skipped_count = 0
+    error_list = []
+
+    try:
+        cur = mysql.connection.cursor()
+        
+        for index, row in df.iterrows():
+            username = str(row.get('username', '')).strip()
+            full_name = str(row.get('full_name', '')).strip()
+            role = str(row.get('role', '')).strip().lower()
+            password = str(row.get('password', '')) if not pd.isna(row.get('password')) else None
+
+            # Validasi data per baris
+            if not all([username, full_name, role]):
+                error_list.append(f"Baris {index + 2}: Data tidak lengkap (username, full_name, role wajib diisi).")
+                continue
+
+            if role not in ['employee', 'technician', 'ga']:
+                error_list.append(f"Baris {index + 2}: Role '{role}' tidak valid untuk user '{username}'.")
+                continue
+
+            # Cek duplikat
+            cur.execute("SELECT id FROM users WHERE username = %s", (username,))
+            if cur.fetchone():
+                skipped_count += 1
+                continue
+
+            # Logika hashing password (sama seperti di /add_user)
+            hashed_password = None
+            if role in ['technician', 'ga']:
+                if not password:
+                    error_list.append(f"Baris {index + 2}: Password wajib untuk role '{role}' (user: {username}).")
+                    continue
+                hashed_password = hash_password(password)
+            elif role == 'employee' and password:
+                hashed_password = hash_password(password)
+            
+            # Insert ke database
+            cur.execute("""
+                INSERT INTO users (username, full_name, password, role)
+                VALUES (%s, %s, %s, %s)
+            """, (username, full_name, hashed_password, role))
+            mysql.connection.commit()
+            new_user_id = cur.lastrowid
+            added_count += 1
+            
+            # Logika pembuatan percakapan otomatis (disalin dari /add_user)
+            if role == 'employee':
+                cur.execute("SELECT id FROM users WHERE role = 'technician' OR role = 'ga'")
+                support_staff_ids = [r[0] for r in cur.fetchall()]
+                for staff_id in support_staff_ids:
+                    cur.execute("INSERT INTO conversations (employee_id, technician_id, status, last_updated) VALUES (%s, %s, 'open', NOW())", (new_user_id, staff_id))
+                    mysql.connection.commit()
+                    emit_new_conversation_details(cur.lastrowid, cur)
+            elif role in ['technician', 'ga']:
+                cur.execute("SELECT id FROM users WHERE role = 'employee'")
+                employee_ids = [r[0] for r in cur.fetchall()]
+                for emp_id in employee_ids:
+                    cur.execute("INSERT INTO conversations (employee_id, technician_id, status, last_updated) VALUES (%s, %s, 'open', NOW())", (emp_id, new_user_id))
+                    mysql.connection.commit()
+                    emit_new_conversation_details(cur.lastrowid, cur)
+
+    except Exception as e:
+        mysql.connection.rollback()
+        print(f"Error saat bulk add users: {e}")
+        return jsonify({'success': False, 'message': f'Terjadi error di server: {str(e)}'}), 500
+    finally:
+        if cur:
+            cur.close()
+
+
+    # 4. Kirim ringkasan hasil ke klien
+    summary_message = f"Proses selesai. Ditambahkan: {added_count}, Duplikat dilewati: {skipped_count}, Error: {len(error_list)}."
+    return jsonify({
+        'success': True, 
+        'message': summary_message,
+        'details': {
+            'added': added_count,
+            'skipped_duplicates': skipped_count,
+            'errors': len(error_list),
+            'error_list': error_list
+        }
+    })
+
 
 def emit_new_conversation_details(conversation_id, cursor):
     """

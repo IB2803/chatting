@@ -15,13 +15,13 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply # Untuk memuat gambar secara asinkron
 from PyQt5.QtCore import pyqtSignal, Qt, QTimer, QUrl, QMimeData, QDir, QStandardPaths, QSettings
-from PyQt5.QtGui import QColor, QFont, QPainter, QBrush, QPalette, QPixmap, QIcon, QDesktopServices, QImage
+from PyQt5.QtGui import QColor,QKeyEvent, QFont, QPainter, QBrush, QPalette, QPixmap, QIcon, QDesktopServices, QImage
 
 
 # Suppress font warnings
 os.environ['QT_LOGGING_RULES'] = 'qt.qpa.fonts=false'
 
-IP = "192.168.46.252" 
+IP = "192.168.29.125" 
 # IP = "192.168.1.7" 
 PORT = "5000"
 
@@ -34,6 +34,30 @@ class FilePasteTextEdit(QTextEdit):
         super().__init__(*args, **kwargs)
         self.parent_chat_window = parent_chat_window
         self.setAcceptRichText(True)
+        
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        # Qt.Key_Return adalah tombol Enter utama
+        # Qt.Key_Enter adalah tombol Enter di numpad
+        # event.modifiers() mengembalikan kombinasi modifier (Shift, Ctrl, Alt, dll.)
+        
+        # Cek apakah tombol Enter ditekan DAN modifier Alt aktif
+        is_enter_key = (event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter)
+        alt_is_pressed = bool(event.modifiers() & Qt.AltModifier) # Cara aman mengecek flag Alt
+
+        if is_enter_key and alt_is_pressed:
+            # Jika Alt + Enter terdeteksi
+            if hasattr(self.parent_chat_window, 'send_message'):
+                print("DEBUG: Alt+Enter pressed, calling send_message.") # Debugging
+                self.parent_chat_window.send_message()
+                event.accept()  # Tandai event sudah ditangani, jangan proses lebih lanjut (mis. jangan buat baris baru)
+                return          # Keluar dari fungsi setelah menangani
+            else:
+                # Fallback jika karena suatu alasan send_message tidak ada
+                super().keyPressEvent(event)
+        else:
+            # Jika bukan Alt+Enter, biarkan QTextEdit menangani event seperti biasa
+            # (misalnya, Enter biasa akan membuat baris baru, ketikan lain akan muncul, dll.)
+            super().keyPressEvent(event)
 
     def canInsertFromMimeData(self, source: QMimeData) -> bool:
         return source.hasUrls() or source.hasImage() or super().canInsertFromMimeData(source)
@@ -381,7 +405,7 @@ class ChatWindow(QWidget):
         
     
     def setup_ui(self):
-        self.setWindowTitle(f"IT Chat - {self.user['full_name']} ({self.user['role'].title()})")
+        self.setWindowTitle(f"IT Chat (Client) - {self.user['full_name']} ({self.user['role'].title()})")
         self.resize(600, 700)
         # self.setFixedSize(600, 900)
         
@@ -1089,7 +1113,7 @@ class LoginWindow(QWidget):
         self.load_saved_accounts_to_combo()
     
     def setup_ui(self):
-        self.setWindowTitle("Login - IT Chat")
+        self.setWindowTitle("Login - IT Chat (Client)")
         # self.setFixedSize(480, 650)
         self.resize(480, 650)
         # Main container
@@ -1118,7 +1142,7 @@ class LoginWindow(QWidget):
         top_layout.addWidget(logo_label)
         
         # Title
-        title = QLabel("IT Chat")
+        title = QLabel("IT Chat (Client)")
         title.setStyleSheet("""
             QLabel {
                 font-size: 28px; 
