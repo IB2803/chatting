@@ -13,7 +13,7 @@ from werkzeug.utils import secure_filename
 from flask import Flask, request, jsonify, send_from_directory
 from apscheduler.schedulers.background import BackgroundScheduler
 
-IP = "192.168.29.125"
+IP = "192.168.46.119"
 # IP = "192.168.1.7"
 PORT = "5000"
 
@@ -110,6 +110,8 @@ def cleanup_old_messages_job():
         finally:
             if cur:
                 cur.close()
+
+
 
 def start_scheduler():
     scheduler = BackgroundScheduler(daemon=True)
@@ -509,6 +511,75 @@ def admin_create_conversation():
         print(f"Error in admin_create_conversation: {e}")
         return jsonify({'success': False, 'message': str(e)}), 500
 
+# Tambahkan di server.py, bisa di bawah endpoint login atau di area manajemen user
+@app.route('/update_status', methods=['POST'])
+def update_status():
+    data = request.get_json()
+    user_id = data.get('user_id')
+    new_status = data.get('status')
+
+    if not user_id or not new_status:
+        return jsonify({'success': False, 'message': 'User ID dan status baru diperlukan.'}), 400
+
+    try:
+        # Menggunakan 'with' memastikan koneksi dan cursor ditutup dengan benar
+        with mysql.connection.cursor() as cur:
+            cur.execute("UPDATE users SET status = %s WHERE id = %s", (new_status, user_id))
+        
+        # Commit dilakukan setelah blok 'with' selesai
+        mysql.connection.commit()
+
+        # Siarkan perubahan status ke semua klien yang terhubung
+        # socketio.emit('status_updated', {
+        #     'user_id': user_id,
+        #     'status': new_status
+        # }, namespace='/', broadcast=True)
+        # socketio.send({'event': 'status_updated', 'data': {'user_id': user_id, 'status': new_status}}, broadcast=True)
+        socketio.server.emit('status_updated', {
+            'user_id': user_id,
+            'status': new_status
+        })
+        print(f"DEBUG: Status user {user_id} diubah menjadi '{new_status}' dan disiarkan.")
+
+        return jsonify({'success': True, 'message': 'Status berhasil diperbarui.'})
+        
+    except Exception as e:
+        # Jika terjadi error, lakukan rollback
+        mysql.connection.rollback()
+        print(f"SERVER_ERROR di /update_status: {e}")
+        return jsonify({'success': False, 'message': f'Error pada server: {str(e)}'}), 500
+
+# @app.route('/update_status', methods=['POST'])
+# def update_status():
+#     data = request.get_json()
+#     user_id = data.get('user_id')
+#     new_status = data.get('status')
+
+#     if not user_id or not new_status:
+#         return jsonify({'success': False, 'message': 'User ID dan status baru diperlukan.'}), 400
+
+#     cur = None
+#     try:
+#         cur = mysql.connection.cursor()
+#         # Perintah UPDATE ini akan bekerja karena kolom 'status' sudah ada
+#         cur.execute("UPDATE users SET status = %s WHERE id = %s", (new_status, user_id))
+#         mysql.connection.commit()
+#         cur.close()
+
+#         # PENTING: Siarkan perubahan status ke semua klien yang terhubung!
+#         socketio.emit('status_updated', {
+#             'user_id': user_id,
+#             'status': new_status
+#         }, broadcast=True)
+#         print(f"DEBUG: Status user {user_id} diubah menjadi '{new_status}' dan disiarkan.")
+
+#         return jsonify({'success': True, 'message': 'Status berhasil diperbarui.'})
+#     except Exception as e:
+#         if cur:
+#             mysql.connection.rollback()
+#             cur.close()
+#         print(f"SERVER_ERROR di /update_status: {e}")
+#         return jsonify({'success': False, 'message': f'Error pada server: {e}'}), 500
 
 @app.route('/login', methods=['POST'])
 def login():
@@ -541,9 +612,24 @@ def login_it():
     cur = mysql.connection.cursor()
     cur.execute("SELECT id, username, role, full_name FROM users WHERE username = %s AND password = %s", (username, password))
     user = cur.fetchone()
-    cur.close()
+    
 
     if user:
+        user_id = user[0]
+        try:
+            cur.execute("UPDATE users SET status = 'Online' WHERE id = %s", (user_id,))
+            mysql.connection.commit()
+            # Siarkan juga status 'Online' ini ke semua client
+            socketio.emit('status_updated', {
+                'user_id': user_id,
+                'status': 'Online'
+            }, broadcast=True)
+            print(f"DEBUG: User {user_id} login, status diubah menjadi 'Online' dan disiarkan.")
+        except Exception as e:
+            mysql.connection.rollback()
+            print(f"SERVER_ERROR saat update status on login: {e}")
+        
+        cur.close()
         return jsonify({
             'success': True,
             'user': {
@@ -553,18 +639,14 @@ def login_it():
                 'full_name': user[3]
             }
         })
+    cur.close()
     return jsonify({'success': False, 'message': 'Invalid credentials'})
 
 @app.route('/get_conversations/<int:user_id>')
 def get_conversations(user_id):
     cur = mysql.connection.cursor()
-    # Ambil juga pesan terakhir dan waktunya untuk setiap percakapan
-    # Ini bisa menjadi query yang lebih kompleks atau beberapa query.
-    # Untuk kesederhanaan, kita akan modifikasi query yang ada dan tambahkan data pesan terakhir.
-    # Anda mungkin perlu membuat kolom 'last_message_preview' dan 'last_message_time' di tabel 'conversations'
-    # dan mengupdatenya setiap kali ada pesan baru. Atau, lakukan join.
     
-    # Query yang dimodifikasi untuk mengambil pesan terakhir (contoh, mungkin perlu optimasi)
+    # Query Anda sudah benar dengan menambahkan t.status
     cur.execute("""
         SELECT 
             c.id, 
@@ -572,8 +654,9 @@ def get_conversations(user_id):
             c.employee_id,
             c.technician_id,
             e.full_name as employee_name, 
-            e.username as employee_username, -- TAMBAHKAN INI
+            e.username as employee_username,
             t.full_name as tech_name,
+            t.status as tech_status,
             c.last_updated,
             m.message as last_message_preview,
             m.sent_at as last_message_time
@@ -587,20 +670,71 @@ def get_conversations(user_id):
     
     conversations_data = []
     for conv_row in cur.fetchall():
+        # --- BAGIAN INI YANG DIPERBAIKI ---
         conversations_data.append({
             'id': conv_row[0],
             'status': conv_row[1],
             'employee_id': conv_row[2],
             'technician_id': conv_row[3],
             'employee_name': conv_row[4],
-            'employee_username': conv_row[5], # TAMBAHKAN INI
+            'employee_username': conv_row[5],
             'tech_name': conv_row[6] if conv_row[6] else 'Belum ditugaskan',
-            'last_updated': conv_row[7].strftime('%Y-%m-%d %H:%M:%S') if conv_row[7] else None,
-            'last_message_preview': conv_row[8] if conv_row[8] else "No messages yet.",
-            'last_message_time': conv_row[9].strftime('%Y-%m-%d %H:%M:%S') if conv_row[9] else (conv_row[7].strftime('%Y-%m-%d %H:%M:%S') if conv_row[7] else None)
+            'tech_status': conv_row[7] if conv_row[7] else 'Nonaktif',               # <-- Ini indeks 7 yang baru
+            'last_updated': conv_row[8].strftime('%Y-%m-%d %H:%M:%S') if conv_row[8] else None, # <-- jadi indeks 8
+            'last_message_preview': conv_row[9] if conv_row[9] else "No messages yet.",     # <-- jadi indeks 9
+            'last_message_time': conv_row[10].strftime('%Y-%m-%d %H:%M:%S') if conv_row[10] else (conv_row[8].strftime('%Y-%m-%d %H:%M:%S') if conv_row[8] else None) # <-- jadi indeks 10 (dan 8 untuk fallback)
         })
     cur.close()
     return jsonify(conversations_data)
+
+# @app.route('/get_conversations/<int:user_id>')
+# def get_conversations(user_id):
+#     cur = mysql.connection.cursor()
+#     # Ambil juga pesan terakhir dan waktunya untuk setiap percakapan
+#     # Ini bisa menjadi query yang lebih kompleks atau beberapa query.
+#     # Untuk kesederhanaan, kita akan modifikasi query yang ada dan tambahkan data pesan terakhir.
+#     # Anda mungkin perlu membuat kolom 'last_message_preview' dan 'last_message_time' di tabel 'conversations'
+#     # dan mengupdatenya setiap kali ada pesan baru. Atau, lakukan join.
+    
+#     # Query yang dimodifikasi untuk mengambil pesan terakhir (contoh, mungkin perlu optimasi)
+#     cur.execute("""
+#         SELECT 
+#             c.id, 
+#             c.status, 
+#             c.employee_id,
+#             c.technician_id,
+#             e.full_name as employee_name, 
+#             e.username as employee_username, -- TAMBAHKAN INI
+#             t.full_name as tech_name,
+#             t.status as tech_status,
+#             c.last_updated,
+#             m.message as last_message_preview,
+#             m.sent_at as last_message_time
+#         FROM conversations c
+#         JOIN users e ON c.employee_id = e.id
+#         LEFT JOIN users t ON c.technician_id = t.id
+#         LEFT JOIN messages m ON c.last_message_id = m.id
+#         WHERE c.employee_id = %s OR c.technician_id = %s
+#         ORDER BY c.last_updated DESC
+#     """, (user_id, user_id))
+    
+#     conversations_data = []
+#     for conv_row in cur.fetchall():
+#         conversations_data.append({
+#             'id': conv_row[0],
+#             'status': conv_row[1],
+#             'employee_id': conv_row[2],
+#             'technician_id': conv_row[3],
+#             'employee_name': conv_row[4],
+#             'employee_username': conv_row[5], # TAMBAHKAN INI
+#             'tech_name': conv_row[6] if conv_row[6] else 'Belum ditugaskan',
+#             'last_updated': conv_row[7].strftime('%Y-%m-%d %H:%M:%S') if conv_row[7] else None,
+#             'last_message_preview': conv_row[8] if conv_row[8] else "No messages yet.",
+#             'last_message_time': conv_row[9].strftime('%Y-%m-%d %H:%M:%S') if conv_row[9] else (conv_row[7].strftime('%Y-%m-%d %H:%M:%S') if conv_row[7] else None),
+#             'tech_status': conv_row[10] if conv_row[10] else 'Nonaktif'
+#         })
+#     cur.close()
+#     return jsonify(conversations_data)
 
 @app.route('/get_messages/<int:conversation_id>')
 def get_messages(conversation_id):

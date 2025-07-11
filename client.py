@@ -21,7 +21,7 @@ from PyQt5.QtGui import QColor,QKeyEvent, QFont, QPainter, QBrush, QPalette, QPi
 # Suppress font warnings
 os.environ['QT_LOGGING_RULES'] = 'qt.qpa.fonts=false'
 
-IP = "192.168.29.125" 
+IP = "192.168.46.119" 
 # IP = "192.168.1.7" 
 PORT = "5000"
 
@@ -161,6 +161,11 @@ class WebSocketThread(threading.Thread):
             # Logika di ChatWindow.handle_received_message seharusnya sudah kompatibel.
             self.chat_window.receive_message_signal.emit(data)
 
+        @self.sio.on('status_updated')
+        def on_status_updated(data):
+            print(f"DEBUG: WebSocketThread (client) - Menerima 'status_updated': {data}")
+            # Emit sinyal ke ChatWindow dengan data status baru
+            self.chat_window.status_update_signal.emit(data)
         
     # def run(self):
     #     ws = create_connection("ws://192.168.45.137:5000")
@@ -383,6 +388,7 @@ class ConversationItem(QWidget):
 
 class ChatWindow(QWidget):
     receive_message_signal = pyqtSignal(dict)
+    status_update_signal = pyqtSignal(dict)
     
     def __init__(self, user, parent=None):
         super().__init__(parent)
@@ -393,6 +399,7 @@ class ChatWindow(QWidget):
         self.setup_ui()
         self.load_conversations()
         
+        self.status_update_signal.connect(self.handle_status_updated)
         # Timer untuk refresh
         self.timer = QTimer(self)
         # self.timer.timeout.connect(self.refresh_messages)
@@ -797,6 +804,30 @@ class ChatWindow(QWidget):
                     widget.unread_dot = dot
     
 
+    def handle_status_updated(self, data):
+        technician_id = data.get('user_id')
+        new_status = data.get('status')
+
+        # Pertama, update data di semua ConversationItem yang relevan (untuk konsistensi)
+        for i in range(self.conversation_list.count()):
+            item = self.conversation_list.item(i)
+            widget = self.conversation_list.itemWidget(item)
+            if widget and widget.conversation_data.get('technician_id') == technician_id:
+                widget.conversation_data['tech_status'] = new_status
+
+        # Kedua, jika percakapan yang sedang aktif adalah dengan teknisi ini, update header
+        current_item = self.conversation_list.currentItem()
+        if current_item:
+            widget = self.conversation_list.itemWidget(current_item)
+            if widget and widget.conversation_data.get('technician_id') == technician_id:
+                self.chat_status.setText(f"● {new_status}")
+                if new_status.lower() == 'online':
+                    self.chat_status.setStyleSheet("color: #2ECC71; font-size: 13px;")
+                elif new_status.lower() == 'nonaktif':
+                    self.chat_status.setStyleSheet("color: #BDC3C7; font-size: 13px;")
+                else:
+                    self.chat_status.setStyleSheet("color: #F1C40F; font-size: 13px;")
+
     def load_conversations(self):
         try: 
             response = requests.get(f"{BASE_URL}/get_conversations/{self.user['id']}")
@@ -858,13 +889,24 @@ class ChatWindow(QWidget):
         
         if self.user['role'] == 'employee':
             name = conv_data.get('tech_name', 'Technician')
-        else:
-            name = conv_data.get('employee_name', 'Employee')
-        
+            # <<< AMBIL STATUS DARI DATA PERCAKAPAN >>>
+            tech_status = conv_data.get('tech_status', 'Nonaktif')
+        else: # seharusnya tidak terjadi di client.py
+            name = conv_data.get('employee_name', 'User')
+            tech_status = "Online"
+
         self.chat_name.setText(name)
-        self.chat_status.setText("🟢 Active now" if conv_data.get('status') != 'closed' else "⚫ Closed")
-        self.chat_avatar.setText(name[0].upper())
+        self.chat_status.setText(f"● {tech_status}") 
         
+        # Atur warna berdasarkan status
+        if tech_status.lower() == 'online':
+            self.chat_status.setStyleSheet("color: #2ECC71; font-size: 13px;") # Hijau
+        elif tech_status.lower() == 'nonaktif':
+            self.chat_status.setStyleSheet("color: #BDC3C7; font-size: 13px;") # Abu-abu
+        else: # Istirahat, Rapat, dll.
+            self.chat_status.setStyleSheet("color: #F1C40F; font-size: 13px;") # Kuning
+
+        self.chat_avatar.setText(name[0].upper())
         self.load_messages(conversation_id)
         
         # Reset style saat dibuka
@@ -1111,6 +1153,7 @@ class LoginWindow(QWidget):
         self.saved_accounts = [] 
         self.setup_ui()
         self.load_saved_accounts_to_combo()
+        self.load_last_saved_nik()
     
     def setup_ui(self):
         self.setWindowTitle("Login - IT Chat (Client)")
@@ -1395,7 +1438,22 @@ class LoginWindow(QWidget):
             self.username_input.setText(selected_account_data.get("username", ""))
             # Tidak ada field password di UI login client ini, jadi tidak perlu diisi
 
+    def load_last_saved_nik(self):
+        """Memuat NIK terakhir yang disimpan dan menampilkannya di input field."""
+        # Kita gunakan key yang berbeda, misal 'last_client_nik'
+        last_nik = self.settings.value("last_client_nik", "") 
+        if last_nik:
+            self.username_input.setText(last_nik)
+            print(f"DEBUG: NIK terakhir '{last_nik}' berhasil dimuat.")
 
+    # Tambahkan method ini juga di dalam kelas LoginWindow di client.py
+
+    def save_last_nik(self, nik):
+        """Menyimpan NIK yang baru saja berhasil login."""
+        self.settings.setValue("last_client_nik", nik)
+        self.settings.sync()
+        print(f"DEBUG: NIK terakhir '{nik}' berhasil disimpan.")
+    
     def handle_login(self):
         username = self.username_input.text() # Ini adalah NIK
         
@@ -1412,6 +1470,7 @@ class LoginWindow(QWidget):
                 if result['success']:
                     if self.remember_me_checkbox.isChecked():
                         self.save_account_to_settings(username) # Simpan NIK
+                        self.save_last_nik(username)
 
                     self.chat_window = ChatWindow(result['user']) # ChatWindow sudah terdefinisi di client.py
                     self.chat_window.show()

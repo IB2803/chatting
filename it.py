@@ -23,7 +23,7 @@ from PyQt5.QtGui import QColor,QKeyEvent, QFont, QPainter, QBrush, QPalette, QPi
 # Suppress font warnings
 os.environ['QT_LOGGING_RULES'] = 'qt.qpa.fonts=false'
 
-IP = "192.168.29.125"
+IP = "192.168.46.119"
 # IP = "192.168.1.5"
 PORT = "5000"
 
@@ -471,25 +471,7 @@ class ChatWindow(QWidget):
         title_layout = QHBoxLayout()
         title_layout.setSpacing(8)
         
-        # Message icon
-        # icon_label = QLabel("💬")
-        # icon_label.setStyleSheet("font-size: 20px;")
-        # title_layout.addWidget(icon_label)
-        
-        # title_label = QLabel("Messages")
-        # title_label.setStyleSheet("""
-        #     QLabel {
-        #         font-size: 20px;
-        #         font-weight: 700;
-        #         color: #FFFFFF;
-        #     }
-        # """)
-        # title_layout.addWidget(title_label)
-        # title_layout.addStretch()
-        
-        # header_layout.addLayout(title_layout)
-        # header_widget.setLayout(header_layout)
-        # sidebar_layout.addWidget(header_widget)
+     
         
         # Search bar
         search_widget = QWidget()
@@ -701,7 +683,34 @@ class ChatWindow(QWidget):
         chat_header_layout.addLayout(info_layout)
         chat_header_layout.addStretch()
         
-        
+        # --- Tombol Status Teknisi ---
+        self.status_button = QToolButton()
+        self.status_button.setPopupMode(QToolButton.InstantPopup)
+        self.status_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.status_button.setIcon(QIcon(self.style().standardIcon(QStyle.SP_ArrowDown))) # Ikon panah bawah
+        self.status_button.setText("Online") # Status awal
+        self.status_button.setStyleSheet("""
+            QToolButton {
+                color: white;
+                background-color: transparent;
+                border: 1px solid white;
+                border-radius: 12px;
+                padding: 5px 10px;
+                font-size: 12px;
+            }
+            QToolButton::menu-indicator { image: none; } /* Sembunyikan panah default ganda */
+        """)
+
+        status_menu = QMenu(self)
+        statuses = ["Online", "Istirahat", "Sedang Sholat", "Rapat", "Nonaktif"]
+        for status in statuses:
+            action = status_menu.addAction(status)
+            # Gunakan lambda untuk menangkap nilai status saat ini
+            action.triggered.connect(lambda checked, s=status: self.handle_status_change(s))
+
+        self.status_button.setMenu(status_menu)
+        chat_header_layout.addWidget(self.status_button)
+        self.status_button.setVisible(self.user['role'] in ['technician', 'ga'])       
         # --- TOMBOL MENU TITIK TIGA BARU ---
         self.chat_options_button = QToolButton(self.chat_header_widget) # Beri parent
         self.chat_options_button.setText("⋮") # Karakter tiga titik vertikal Unicode
@@ -961,6 +970,25 @@ class ChatWindow(QWidget):
             self.action_edit_user.setEnabled(True)
             self.action_delete_user.setEnabled(True)
 
+    def handle_status_change(self, new_status):
+        print(f"DEBUG: Meminta perubahan status ke: {new_status}")
+        
+        # Update UI langsung
+        self.status_button.setText(new_status)
+
+        # Kirim request ke server
+        try:
+            data = {
+                "user_id": self.user['id'],
+                "status": new_status
+            }
+            response = requests.post(f"{BASE_URL}/update_status", json=data)
+            if response.status_code != 200 or not response.json().get('success'):
+                # Jika gagal, kembalikan teks tombol ke status sebelumnya atau tampilkan error
+                QMessageBox.warning(self, "Gagal", "Tidak dapat memperbarui status ke server.")
+                # Anda mungkin ingin menyimpan status lama untuk rollback UI
+        except requests.exceptions.RequestException as e:
+            QMessageBox.critical(self, "Error Koneksi", f"Gagal terhubung ke server untuk update status: {e}")
 
     def filter_conversations(self, text):
         search_text = text.lower().strip() # Teks pencarian, lowercase, dan hapus spasi di awal/akhir
@@ -1976,7 +2004,15 @@ class ChatWindow(QWidget):
     def closeEvent(self, event):
         print("DEBUG: ChatWindow - closeEvent triggered. Returning to LoginWindow.")
 
-        # 1. Hentikan WebSocketThread
+        try:
+            print("DEBUG: Menyetel status ke Nonaktif sebelum keluar...")
+            requests.post(f"{BASE_URL}/update_status", json={
+                "user_id": self.user['id'],
+                "status": "Nonaktif"
+            }, timeout=2) # Beri timeout singkat
+        except Exception as e:
+            print(f"WARNING: Tidak dapat menyetel status ke Nonaktif saat keluar: {e}")
+            # 1. Hentikan WebSocketThread
         if hasattr(self, 'ws_thread') and self.ws_thread.is_alive():
             print("DEBUG: ChatWindow - Stopping WebSocket thread...")
             self.ws_thread.stop()  # Panggil metode stop dari WebSocketThread
