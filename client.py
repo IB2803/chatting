@@ -21,7 +21,7 @@ from PyQt5.QtGui import QColor, QFont, QPainter, QBrush, QPalette, QPixmap, QIco
 # Suppress font warnings
 os.environ['QT_LOGGING_RULES'] = 'qt.qpa.fonts=false'
 
-IP = "192.168.47.192" 
+IP = "192.168.47.153" 
 # IP = "192.168.1.5" 
 PORT = "5000"
 
@@ -136,21 +136,6 @@ class WebSocketThread(threading.Thread):
             # Emit sinyal ke ChatWindow dengan payload ini.
             # Logika di ChatWindow.handle_received_message seharusnya sudah kompatibel.
             self.chat_window.receive_message_signal.emit(data)
-
-        
-    # def run(self):
-    #     ws = create_connection("ws://192.168.45.137:5000")
-    #     # ws = create_connection(f"ws://{BASE_URL.split('//')[1]}")
-    #     while self.running:
-    #         try:
-    #             message = ws.recv()
-    #             data = json.loads(message)
-    #             if data.get('event') == 'new_message':
-    #                 self.chat_window.receive_message_signal.emit(data['data'])
-    #         except Exception as e:
-    #             print("WebSocket error:", e)
-    #             break
-    #     ws.close()
         
     def run(self):
         # MODIFIKASI DI SINI: Tambahkan /socket.io/ pada URL
@@ -328,20 +313,7 @@ class ConversationItem(QWidget):
             status_label = QLabel("• Closed")
             status_label.setStyleSheet("color: #95A5A6; font-size: 12px;")
             name_status_layout.addWidget(status_label)
-        
-        # name_status_layout.addStretch()
-        # info_layout.addLayout(name_status_layout)
-        
-        # Last message preview (if available)
-        # preview_label = QLabel("Click to start conversation")
-        # preview_label.setStyleSheet("""
-        #     QLabel {
-        #         color: #7F8C8D;
-        #         font-size: 13px;
-        #     }
-        # """)
-        # info_layout.addWidget(preview_label)
-        
+                
         layout.addLayout(info_layout)
         self.setLayout(layout)
         
@@ -421,54 +393,6 @@ class ChatWindow(QWidget):
         title_layout = QHBoxLayout()
         title_layout.setSpacing(8)
         
-        # # Message icon
-        # icon_label = QLabel("💬")
-        # icon_label.setStyleSheet("font-size: 20px;")
-        # title_layout.addWidget(icon_label)
-        
-        # title_label = QLabel("Messages")
-        # title_label.setStyleSheet("""
-        #     QLabel {
-        #         font-size: 20px;
-        #         font-weight: 700;
-        #         color: #2C3E50;
-        #     }
-        # """)
-        # title_layout.addWidget(title_label)
-        # title_layout.addStretch()
-        
-        # header_layout.addLayout(title_layout)
-        # header_widget.setLayout(header_layout)
-        # sidebar_layout.addWidget(header_widget)
-        
-        # # Search bar
-        # search_widget = QWidget()
-        # search_widget.setFixedHeight(60)
-        # search_widget.setStyleSheet("background-color: #FFFFFF;")
-        
-        # search_layout = QHBoxLayout()
-        # search_layout.setContentsMargins(20, 10, 20, 10)
-        
-        # search_input = QLineEdit()
-        # search_input.setPlaceholderText("🔍 Search messages...")
-        # search_input.setStyleSheet("""
-        #     QLineEdit {
-        #         background-color: #F1F3F4;
-        #         border: none;
-        #         border-radius: 20px;
-        #         padding: 10px 16px;
-        #         font-size: 14px;
-        #         color: #2C3E50;
-        #     }
-        #     QLineEdit:focus {
-        #         background-color: #FFFFFF;
-        #         border: 2px solid #4A90E2;
-        #     }
-        # """)
-        # search_layout.addWidget(search_input)
-        # search_widget.setLayout(search_layout)
-        # sidebar_layout.addWidget(search_widget)
-        
         # Conversations list
         self.conversation_list = QListWidget()
         self.conversation_list.setStyleSheet("""
@@ -491,40 +415,6 @@ class ChatWindow(QWidget):
         self.conversation_list.itemClicked.connect(self.select_conversation)
         sidebar_layout.addWidget(self.conversation_list)
         
-        # New chat button (for employees                   )  
-        # if self.user['role'] == 'employee':
-        #     button_widget = QWidget()
-        #     button_widget.setFixedHeight(80)
-        #     button_widget.setStyleSheet("background-color: #FFFFFF; border-top: 1px solid #E8ECEF;")
-            
-        #     button_layout = QHBoxLayout()
-        #     button_layout.setContentsMargins(20, 20, 20, 20)
-            
-        #     self.new_chat_btn = QPushButton("✨ New Ticket")
-        #     self.new_chat_btn.setStyleSheet("""
-        #         QPushButton {
-        #             background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
-        #                 stop:0 #4A90E2, stop:1 #357ABD);
-        #             color: white;
-        #             border: none;
-        #             padding: 12px 24px;
-        #             border-radius: 20px;
-        #             font-size: 14px;
-        #             font-weight: 600;
-        #         }
-        #         QPushButton:hover {
-        #             background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
-        #                 stop:0 #357ABD, stop:1 #2E6DA4);
-        #         }
-        #         QPushButton:pressed {
-        #             background: #2E6DA4;
-        #         }
-        #     """)
-        #     self.new_chat_btn.clicked.connect(self.create_new_conversation)
-        #     button_layout.addWidget(self.new_chat_btn)
-        #     button_widget.setLayout(button_layout)
-        #     sidebar_layout.addWidget(button_widget)
-        
         sidebar.setLayout(sidebar_layout)
         main_layout.addWidget(sidebar)
         
@@ -539,7 +429,6 @@ class ChatWindow(QWidget):
         self.chat_header_widget.setStyleSheet("""
             QWidget {
                 background-color: #3D82CA;
-                
             }
         """)
         
@@ -592,6 +481,51 @@ class ChatWindow(QWidget):
         chat_area.addWidget(self.chat_header_widget)
         
         # Messages area
+        self.show_past_messages = QPushButton("Show Previous Messages")
+        self.show_past_messages.setCheckable(True)
+        self.show_past_messages.setFixedSize(200, 45)
+        self.show_past_messages.setStyleSheet('''
+            QPushButton {
+                background-color: rgba(74, 144, 226, 0.1);
+                color: #4A90E2;
+                border: 2px solid #4A90E2;
+                border-radius: 18px;
+                font-size: 12px;
+                font-weight: 500;
+                padding: 6px 12px;
+                margin: 6px;
+            }
+            QPushButton:hover {
+                background-color: rgba(74, 144, 226, 0.2);
+                border-color: #357ABD;
+                color: #357ABD;
+            }
+            QPushButton:pressed {
+                background-color: rgba(74, 144, 226, 0.3);
+            }
+            QPushButton:checked {
+                background-color: #4A90E2;
+                color: white;
+                border-color: #4A90E2;
+            }
+            QPushButton:checked:hover {
+                background-color: #357ABD;
+                border-color: #357ABD;
+            }
+        ''')
+        self.show_past_messages.clicked.connect(self.handle_past_message_button) # Handler baru
+        
+        past_messages_container = QWidget()
+        past_messages_container.setStyleSheet("background-color: transparent;")
+        past_messages_layout = QHBoxLayout(past_messages_container)
+        past_messages_layout.setContentsMargins(0, 0, 0, 0)
+        past_messages_layout.addWidget(self.show_past_messages, alignment=Qt.AlignCenter)
+        
+        chat_area.addWidget(past_messages_container)
+
+        if not self.current_conversation:
+            self.show_past_messages.hide()
+        
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setStyleSheet("""
@@ -820,6 +754,9 @@ class ChatWindow(QWidget):
         if not item:
             print("DEBUG: ChatWindow - select_conversation dipanggil dengan item None") # DEBUG
             return
+        
+        self.show_past_messages.show()
+        self.show_past_messages.setChecked(True)
 
         conversation_id = item.data(Qt.UserRole)
         print(f"DEBUG: ChatWindow - Memilih percakapan ID: {conversation_id}") # DEBUG
@@ -850,10 +787,10 @@ class ChatWindow(QWidget):
             conv_widget.unread_dot.deleteLater()
             del conv_widget.unread_dot
     
-    def load_messages(self, conversation_id, scroll_to_bottom=False):
+    def load_messages(self, conversation_id, time="current", scroll_to_bottom=False):
         print(f"DEBUG: ChatWindow - Memuat pesan untuk conv_id: {conversation_id}") # DEBUG
         try:
-            response = requests.get(f"{BASE_URL}/get_messages/{conversation_id}", timeout=5)
+            response = requests.get(f"{BASE_URL}/get_messages/{conversation_id}/{time}", timeout=5)
             print(f"DEBUG: ChatWindow - Status load_messages: {response.status_code}") # DEBUG
             if response.status_code == 200:
                 try:
@@ -975,12 +912,31 @@ class ChatWindow(QWidget):
         else: # Pesan untuk percakapan yang tidak aktif
             if item_found_in_sidebar:
                 print(f"DEBUG: IT/handle_received_message - Pesan untuk percakapan TIDAK aktif {conv_id}. Menandai belum dibaca dan pindah ke atas.")
-                self.mark_conversation_unread(conv_id, message_content.get("message")) # Ini akan set preview_label ke "🔵 New message"
+                self.mark_conversation_unread(conv_id) # Ini akan set preview_label ke "🔵 New message"
             else:
                 # Percakapan ini belum ada di list, mungkin percakapan baru yang dibuat oleh employee lain
                 print(f"DEBUG: IT/handle_received_message - Pesan untuk percakapan BARU {conv_id} (tidak ada di list). Memuat ulang semua.")
                 self.load_conversations() # Muat ulang semua untuk menampilkan percakapan baru ini
                 self.unread_map[conv_id] = True # Tandai sebagai belum dibaca di map
+
+    def handle_past_message_button(self):
+        if not self.current_conversation:
+            QMessageBox.information(self, "Info", "Tidak ada percakapan yang dipilih untuk melihat pesan sebelumnya.")
+            return
+        print(f"DEBUG: ChatWindow - {self.show_past_messages.isChecked()}.")
+        # Cek apakah tombol sudah aktif
+        if self.show_past_messages.isChecked():
+            # Jika sudah aktif, sembunyikan pesan sebelumnya
+            self.show_past_messages.setText("Show Previous Messages")
+            print("DEBUG: ChatWindow - Menyembunyikan pesan sebelumnya.")
+            self.load_messages(self.current_conversation, time="current")
+            
+        else:
+            # Jika belum aktif, tampilkan pesan sebelumnya
+            self.show_past_messages.setText("Hide Previous Messages")
+            print("DEBUG: ChatWindow - Menampilkan pesan sebelumnya.")
+            # Tampilkan semua pesan sebelumnya
+            self.load_messages(self.current_conversation, time="all")
 
     def message_exists(self, msg_id):
         if msg_id is None: return False # Jika msg_id None, anggap belum ada
