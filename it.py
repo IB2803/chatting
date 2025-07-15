@@ -23,7 +23,7 @@ from PyQt5.QtGui import QColor,QKeyEvent, QFont, QPainter, QBrush, QPalette, QPi
 # Suppress font warnings
 os.environ['QT_LOGGING_RULES'] = 'qt.qpa.fonts=false'
 
-IP = "192.168.47.134"
+IP = "192.168.47.72"
 # IP = "192.168.1.5"
 PORT = "5000"
 
@@ -480,8 +480,6 @@ class ChatWindow(QWidget):
         title_layout = QHBoxLayout()
         title_layout.setSpacing(8)
         
-     
-        
         # Search bar
         search_widget = QWidget()
         search_widget.setFixedHeight(60)
@@ -530,43 +528,12 @@ class ChatWindow(QWidget):
             QListWidget::item:selected {
                 background-color: transparent;
                 border-left: 9px solid #4A90E2;
-            
-                
             }
         """)
         self.conversation_list.itemClicked.connect(self.select_conversation)
         sidebar_layout.addWidget(self.conversation_list)
         
-        # Tombol "Add User" (jika hanya untuk technician/admin)
         if self.user['role'] == 'technician': # Misal hanya teknisi yang bisa tambah user
-            # self.add_user_btn = QPushButton("👤 Add User")
-            # # ... (style dan connect add_user_btn seperti sebelumnya) ...
-            # self.add_user_btn.setStyleSheet("""
-            #     QPushButton {
-            #         background-color: #2ECC71; color: white; border: none;
-            #         padding: 10px; border-radius: 18px; font-size: 13px;
-            #         font-weight: 500; margin: 5px 20px;
-            #     }
-            #     QPushButton:hover { background-color: #27AE60; }
-            #     QPushButton:pressed { background-color: #1E8449; }
-            # """)
-            # self.add_user_btn.clicked.connect(self.handle_add_user_button_click)
-            # sidebar_layout.addWidget(self.add_user_btn)
-
-            # # Tombol "New Custom Conversation" untuk technician
-            # self.new_custom_conv_btn = QPushButton("💬+ New Custom Conversation")
-            # self.new_custom_conv_btn.setStyleSheet("""
-            #     QPushButton {
-            #         background-color: #3498DB; /* Warna biru sebagai contoh */
-            #         color: white; border: none;
-            #         padding: 10px; border-radius: 18px; font-size: 13px;
-            #         font-weight: 500; margin: 5px 20px;
-            #     }
-            #     QPushButton:hover { background-color: #2980B9; }
-            #     QPushButton:pressed { background-color: #1F618D; }
-            # """)
-            # self.new_custom_conv_btn.clicked.connect(self.handle_new_custom_conversation_click)
-            # sidebar_layout.addWidget(self.new_custom_conv_btn)
             self.add_contact_btn = QPushButton("👤 Add Contact")
             self.add_contact_btn.setStyleSheet("""
                 QPushButton {
@@ -644,11 +611,8 @@ class ChatWindow(QWidget):
         self.chat_header_widget.setStyleSheet("""
             QWidget {
                 background-color: #3D82CA;
-                
             }
         """)
-        
-
         
         # User avatar and info
         self.chat_avatar = QLabel()
@@ -800,11 +764,55 @@ class ChatWindow(QWidget):
         chat_header_layout.addWidget(self.chat_options_button) # Tambahkan tombol ke header
         # --- AKHIR BAGIAN TOMBOL MENU ---
 
-        
         self.chat_header_widget.setLayout(chat_header_layout)
         chat_area.addWidget(self.chat_header_widget)
         
         # Messages area
+        self.show_past_messages = QPushButton("Show Previous Messages")
+        self.show_past_messages.setCheckable(True)
+        self.show_past_messages.setFixedSize(200, 45)
+        self.show_past_messages.setStyleSheet('''
+            QPushButton {
+                background-color: rgba(74, 144, 226, 0.1);
+                color: #4A90E2;
+                border: 2px solid #4A90E2;
+                border-radius: 18px;
+                font-size: 12px;
+                font-weight: 500;
+                padding: 6px 12px;
+                margin: 6px;
+            }
+            QPushButton:hover {
+                background-color: rgba(74, 144, 226, 0.2);
+                border-color: #357ABD;
+                color: #357ABD;
+            }
+            QPushButton:pressed {
+                background-color: rgba(74, 144, 226, 0.3);
+            }
+            QPushButton:checked {
+                background-color: #4A90E2;
+                color: white;
+                border-color: #4A90E2;
+            }
+            QPushButton:checked:hover {
+                background-color: #357ABD;
+                border-color: #357ABD;
+            }
+        ''')
+        self.show_past_messages.clicked.connect(self.handle_past_message_button) # Handler baru
+        
+        past_messages_container = QWidget()
+        past_messages_container.setStyleSheet("background-color: transparent;")
+        past_messages_layout = QHBoxLayout(past_messages_container)
+        past_messages_layout.setContentsMargins(0, 0, 0, 0)
+        past_messages_layout.addWidget(self.show_past_messages, alignment=Qt.AlignCenter)
+        
+        chat_area.addWidget(past_messages_container)
+
+        if not self.current_conversation:
+            self.show_past_messages.hide()
+        
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setStyleSheet("""
@@ -837,6 +845,7 @@ class ChatWindow(QWidget):
         self.messages_layout.setContentsMargins(24, 20, 24, 20)
         self.messages_layout.setSpacing(8)
         self.messages_layout.addStretch(1)
+        
         
         self.messages_container.setLayout(self.messages_layout)
         self.scroll_area.setWidget(self.messages_container)
@@ -1121,7 +1130,8 @@ class ChatWindow(QWidget):
         if reply == QMessageBox.Yes:
             print(f"DEBUG: Mengirim permintaan hapus untuk support staff ID {user_id} ({user_name})")
             try:
-                response = requests.delete(f"{BASE_URL}/delete_support_user/{user_id}")
+                response = requests.delete(f"{BASE_URL}/delete_user/{user_id}")
+                # response = requests.delete(f"{BASE_URL}/delete_support_user/{user_id}")
                 response_data = response.json()
 
                 if response.status_code == 200 and response_data.get('success'):
@@ -1253,50 +1263,6 @@ class ChatWindow(QWidget):
             except Exception as e_generic:
                 QMessageBox.critical(self, "Error", f"An unexpected error occurred: {e_generic}")
 
-    # HAPUS ATAU KOMENTARI HANDLER LAMA INI JIKA SUDAH TIDAK DIGUNAKAN LANGSUNG
-    # def handle_add_user_button_click(self): ...
-    # def handle_new_custom_conversation_click(self): ...
-    def handle_new_custom_conversation_click(self):
-        dialog = CreateConversationDialog(self)
-        if dialog.exec_() == QDialog.Accepted:
-            selected_ids = dialog.get_selected_ids()
-
-            if selected_ids is None:
-                QMessageBox.warning(self, "Selection Error", "Please select both an employee and a technician.")
-                return
-
-            if selected_ids['employee_id'] == selected_ids['technician_id']:
-                QMessageBox.warning(self, "Selection Error", "Employee and Technician cannot be the same user.")
-                return
-
-            print(f"DEBUG: Attempting to create custom conversation with data: {selected_ids}")
-
-            try:
-                response = requests.post(f"{BASE_URL}/admin_create_conversation", json=selected_ids)
-                response_data = response.json()
-
-                if response.status_code == 200 and response_data.get('success'):
-                    QMessageBox.information(self, "Success", response_data.get('message', "Conversation created successfully!"))
-                    # Server sekarang mengirim 'conversation_created' via socket,
-                    # jadi idealnya handle_conversation_created akan mengurus penambahan ke list.
-                    # Jika tidak, atau sebagai fallback:
-                    self.load_conversations() # Muat ulang daftar percakapan
-                    # Anda bisa memilih untuk langsung membuka percakapan baru ini:
-                    # new_conv_id = response_data.get('conversation_id')
-                    # if new_conv_id:
-                    #     self.select_conversation_by_id(new_conv_id)
-                elif response_data.get('message'):
-                    QMessageBox.warning(self, "Creation Failed", response_data.get('message'))
-                else:
-                    QMessageBox.critical(self, "Server Error", f"Server returned status {response.status_code}: {response.text}")
-
-            except requests.exceptions.RequestException as e:
-                QMessageBox.critical(self, "Connection Error", f"Could not connect to server: {e}")
-            except json.JSONDecodeError:
-                QMessageBox.critical(self, "Server Error", f"Invalid response from server: {response.text}")
-            except Exception as e_generic:
-                QMessageBox.critical(self, "Error", f"An unexpected error occurred: {e_generic}")
-
     def handle_add_user_button_click(self):
         dialog = AddUserDialog(self)
         if dialog.exec_() == QDialog.Accepted:
@@ -1383,6 +1349,25 @@ class ChatWindow(QWidget):
             self._handle_delete_employee_from_conversation() # Contoh refactor
         else:
             self.open_manage_support_dialog(mode='delete')
+            
+    def handle_past_message_button(self):
+        if not self.current_conversation:
+            QMessageBox.information(self, "Info", "Tidak ada percakapan yang dipilih untuk melihat pesan sebelumnya.")
+            return
+        print(f"DEBUG: ChatWindow - {self.show_past_messages.isChecked()}.")
+        # Cek apakah tombol sudah aktif
+        if self.show_past_messages.isChecked():
+            # Jika sudah aktif, sembunyikan pesan sebelumnya
+            self.show_past_messages.setText("Show Previous Messages")
+            print("DEBUG: ChatWindow - Menyembunyikan pesan sebelumnya.")
+            self.load_messages(self.current_conversation, time="current")
+            
+        else:
+            # Jika belum aktif, tampilkan pesan sebelumnya
+            self.show_past_messages.setText("Hide Previous Messages")
+            print("DEBUG: ChatWindow - Menampilkan pesan sebelumnya.")
+            # Tampilkan semua pesan sebelumnya
+            self.load_messages(self.current_conversation, time="all")
             
     def _handle_delete_employee_from_conversation(self):
         if not self.current_conversation:
@@ -1634,6 +1619,8 @@ class ChatWindow(QWidget):
             return
         self.update_chat_input_active_state(True)
         self.back_button.setVisible(True)
+        self.show_past_messages.show()
+        self.show_past_messages.setChecked(True)
         conversation_id = item.data(Qt.UserRole)
         print(f"DEBUG: ChatWindow - Memilih percakapan ID: {conversation_id}") # DEBUG
         self.current_conversation = conversation_id
@@ -1720,9 +1707,11 @@ class ChatWindow(QWidget):
         # 3. Set current_conversation menjadi None
         self.current_conversation = None
 
-        # 4. Nonaktifkan area input pesan
+        # 4. Nonaktifkan widget tertentu
         self.update_chat_input_active_state(False)
         self.update_menu_actions_for_context() # PANGGIL DI SINI
+        self.show_past_messages.hide()
+        
 
         # 5. (Opsional) Hapus sorotan dari QListWidget jika ada
         if self.conversation_list.currentItem():
@@ -1743,10 +1732,10 @@ class ChatWindow(QWidget):
         # teruskan event ke handler default kelas induk.
         super().keyPressEvent(event)         
         
-    def load_messages(self, conversation_id, scroll_to_bottom=False):
+    def load_messages(self, conversation_id, time="current", scroll_to_bottom=False):
         print(f"DEBUG: ChatWindow - Memuat pesan untuk conv_id: {conversation_id}") # DEBUG
         try:
-            response = requests.get(f"{BASE_URL}/get_messages/{conversation_id}", timeout=5)
+            response = requests.get(f"{BASE_URL}/get_messages/{conversation_id}/{time}", timeout=5)
             print(f"DEBUG: ChatWindow - Status load_messages: {response.status_code}") # DEBUG
             if response.status_code == 200:
                 try:

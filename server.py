@@ -11,9 +11,9 @@ from datetime import datetime, timedelta
 import os
 from werkzeug.utils import secure_filename
 from flask import Flask, request, jsonify, send_from_directory
-from apscheduler.schedulers.background import BackgroundScheduler
+# from apscheduler.schedulers.background import BackgroundScheduler
 
-IP = "192.168.47.134"
+IP = "192.168.47.72"
 # IP = "192.168.1.7"
 PORT = "5000"
 
@@ -111,29 +111,27 @@ def cleanup_old_messages_job():
             if cur:
                 cur.close()
 
+# def start_scheduler():
+#     scheduler = BackgroundScheduler(daemon=True)
+#     # Jalankan job cleanup_old_messages_job:
+#     # 'cron' digunakan untuk jadwal yang lebih spesifik.
+#     # day_of_week='sun' berarti setiap hari Minggu.
+#     # hour=1, minute=0 berarti jam 01:00 pagi.
 
-
-def start_scheduler():
-    scheduler = BackgroundScheduler(daemon=True)
-    # Jalankan job cleanup_old_messages_job:
-    # 'cron' digunakan untuk jadwal yang lebih spesifik.
-    # day_of_week='sun' berarti setiap hari Minggu.
-    # hour=1, minute=0 berarti jam 01:00 pagi.
-
-    scheduler.add_job(
-        cleanup_old_messages_job, 
-        trigger='cron', 
-        day_of_week='sun',  # 0=Senin, 1=Selasa, ..., 6=Minggu ATAU 'sun', 'mon', etc.
-        hour=1,             # Jam 1 pagi
-        minute=0,           # Menit ke-0
-        misfire_grace_time=3600 # Toleransi jika server down saat jadwal (1 jam)
-    )
+#     scheduler.add_job(
+#         cleanup_old_messages_job, 
+#         trigger='cron', 
+#         day_of_week='sun',  # 0=Senin, 1=Selasa, ..., 6=Minggu ATAU 'sun', 'mon', etc.
+#         hour=1,             # Jam 1 pagi
+#         minute=0,           # Menit ke-0
+#         misfire_grace_time=3600 # Toleransi jika server down saat jadwal (1 jam)
+#     )
     
-    try:
-        scheduler.start()
-        print("APScheduler untuk pembersihan pesan mingguan (setiap Minggu pukul 01:00) telah dimulai.")
-    except Exception as e_scheduler:
-        print(f"Error starting APScheduler: {e_scheduler}")
+#     try:
+#         scheduler.start()
+#         print("APScheduler untuk pembersihan pesan mingguan (setiap Minggu pukul 01:00) telah dimulai.")
+#     except Exception as e_scheduler:
+#         print(f"Error starting APScheduler: {e_scheduler}")
 
 
 
@@ -268,78 +266,79 @@ def update_employee(user_id):
 
 
 
-@app.route('/delete_support_user/<int:user_id>', methods=['DELETE'])
-def delete_support_user(user_id):
-    """Endpoint untuk menghapus support staff (technician/ga)."""
-    cur = None
-    try:
-        cur = mysql.connection.cursor()
+# @app.route('/delete_support_user/<int:user_id>', methods=['DELETE'])
+# def delete_support_user(user_id):
+#     """Endpoint untuk menghapus support staff (technician/ga)."""
+#     cur = None
+#     try:
+#         cur = mysql.connection.cursor()
 
-        # 1. Validasi: Pastikan user ada dan merupakan support staff
-        cur.execute("SELECT role, full_name FROM users WHERE id = %s", (user_id,))
-        user_to_delete = cur.fetchone()
-        if not user_to_delete:
-            cur.close()
-            return jsonify({'success': False, 'message': 'User tidak ditemukan.'}), 404
+#         # 1. Validasi: Pastikan user ada dan merupakan support staff
+#         cur.execute("SELECT role, full_name FROM users WHERE id = %s", (user_id,))
+#         user_to_delete = cur.fetchone()
+#         if not user_to_delete:
+#             cur.close()
+#             return jsonify({'success': False, 'message': 'User tidak ditemukan.'}), 404
         
-        role, full_name = user_to_delete
-        if role not in ['technician', 'ga']:
-            cur.close()
-            return jsonify({'success': False, 'message': 'Hanya role technician atau GA yang bisa dihapus.'}), 403
+#         role, full_name = user_to_delete
+#         if role not in ['technician', 'ga']:
+#             cur.close()
+#             return jsonify({'success': False, 'message': 'Hanya role technician atau GA yang bisa dihapus.'}), 403
 
-        # 2. Validasi Keamanan: Jangan biarkan teknisi terakhir dihapus
-        if role == 'technician':
-            cur.execute("SELECT COUNT(*) FROM users WHERE role = 'technician'")
-            technician_count = cur.fetchone()[0]
-            if technician_count <= 1:
-                cur.close()
-                return jsonify({'success': False, 'message': 'Tidak bisa menghapus teknisi terakhir yang tersisa.'}), 400
+#         # 2. Validasi Keamanan: Jangan biarkan teknisi terakhir dihapus
+#         if role == 'technician':
+#             cur.execute("SELECT COUNT(*) FROM users WHERE role = 'technician'")
+#             technician_count = cur.fetchone()[0]
+#             if technician_count <= 1:
+#                 cur.close()
+#                 return jsonify({'success': False, 'message': 'Tidak bisa menghapus teknisi terakhir yang tersisa.'}), 400
 
-        # 3. Penanganan Percakapan: Set technician_id menjadi NULL pada percakapan yang ditangani
-        #    Ini akan membuat tiket menjadi "unassigned" daripada menghapus seluruh percakapan.
-        cur.execute("UPDATE conversations SET technician_id = NULL WHERE technician_id = %s", (user_id,))
-        print(f"DEBUG: {cur.rowcount} percakapan yang ditangani oleh user {user_id} telah di-unassign.")
-        
-        cur.execute("SELECT id FROM conversations WHERE employee_id = %s", (user_id,))
-        conversation_ids_tuples = cur.fetchall()
-        conversation_ids_to_delete = [conv_tuple[0] for conv_tuple in conversation_ids_tuples]
-        
-        all_files_to_delete_on_disk = []
-
-        if conversation_ids_to_delete:
-            for conv_id in conversation_ids_to_delete:
-                # a. (Opsional) Ambil file_path dari pesan yang akan dihapus
-                cur.execute("SELECT file_path FROM messages WHERE conversation_id = %s AND file_path IS NOT NULL", (conv_id,))
-                files_in_conv = [row[0] for row in cur.fetchall()]
-                all_files_to_delete_on_disk.extend(files_in_conv)
-
-                # b. Atur last_message_id menjadi NULL di tabel conversations untuk percakapan ini
-                cur.execute("UPDATE conversations SET last_message_id = NULL WHERE id = %s", (conv_id,))
+#         # 3. Penanganan Percakapan: Set technician_id menjadi NULL pada percakapan yang ditangani
+#         #    Ini akan membuat tiket menjadi "unassigned" daripada menghapus seluruh percakapan.
+#         # cur.execute("UPDATE conversations SET technician_id = NULL WHERE technician_id = %s", (user_id,))
                 
-                # c. Hapus pesan dari percakapan ini
-                cur.execute("DELETE FROM messages WHERE conversation_id = %s", (conv_id,))
-                print(f"DEBUG: Server - Menghapus pesan dari percakapan ID: {conv_id}")
+#         cur.execute("SELECT id FROM conversations WHERE employee_id = %s OR technician_id = %s", (user_id, user_id))
+#         conversation_ids_tuples = cur.fetchall()
+#         conversation_ids_to_delete = [conv_tuple[0] for conv_tuple in conversation_ids_tuples]
+                
+#         all_files_to_delete_on_disk = []
+#         print(f"Debug Tes delete SERVER")
 
-            # d. Hapus semua percakapan yang terkait setelah pesannya dihapus
-            # Gunakan %s placeholder untuk setiap ID dalam list
-            format_strings = ','.join(['%s'] * len(conversation_ids_to_delete))
-            cur.execute(f"DELETE FROM conversations WHERE id IN ({format_strings})", tuple(conversation_ids_to_delete))
-            print(f"DEBUG: Server - Menghapus percakapan dengan ID: {conversation_ids_to_delete}")
+#         if conversation_ids_to_delete:
+#             for conv_id in conversation_ids_to_delete:
+#                 # a. (Opsional) Ambil file_path dari pesan yang akan dihapus
+#                 cur.execute("SELECT file_path FROM messages WHERE conversation_id = %s AND file_path IS NOT NULL", (conv_id,))
+#                 files_in_conv = [row[0] for row in cur.fetchall()]
+#                 all_files_to_delete_on_disk.extend(files_in_conv)
 
-        # 4. Hapus User
-        cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
+#                 # print(f"DEBUG: {cur.rowcount} percakapan yang ditangani oleh user {user_id} telah di-unassign.")
+#                 # b. Atur last_message_id menjadi NULL di tabel conversations untuk percakapan ini
+#                 cur.execute("UPDATE conversations SET last_message_id = NULL WHERE id = %s", (conv_id,))
+                 
+#                 # c. Hapus pesan dari percakapan ini
+#                 cur.execute("DELETE FROM messages WHERE conversation_id = %s", (conv_id,))
+#                 print(f"DEBUG: Server - Menghapus pesan dari percakapan ID: {conv_id}")
+
+#             # d. Hapus semua percakapan yang terkait setelah pesannya dihapus
+#             # Gunakan %s placeholder untuk setiap ID dalam list
+#             format_strings = ','.join(['%s'] * len(conversation_ids_to_delete))
+#             cur.execute(f"DELETE FROM conversations WHERE id IN ({format_strings})", tuple(conversation_ids_to_delete))
+#             print(f"DEBUG: Server - Menghapus percakapan dengan ID: {conversation_ids_to_delete}")
+
+#         # 4. Hapus User
+#         cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
         
-        mysql.connection.commit()
-        cur.close()
+#         mysql.connection.commit()
+#         cur.close()
         
-        return jsonify({'success': True, 'message': f'Support staff {full_name} berhasil dihapus.'})
+#         return jsonify({'success': True, 'message': f'Support staff {full_name} berhasil dihapus.'})
 
-    except Exception as e:
-        if cur:
-            mysql.connection.rollback()
-            cur.close()
-        print(f"SERVER_ERROR di /delete_support_user/{user_id}: {e}")
-        return jsonify({'success': False, 'message': f'Error pada server: {e}'}), 500
+#     except Exception as e:
+#         if cur:
+#             mysql.connection.rollback()
+#             cur.close()
+#         print(f"SERVER_ERROR di /delete_support_user/{user_id}: {e}")
+#         return jsonify({'success': False, 'message': f'Error pada server: {e}'}), 500
 
 
 @app.route('/get_users_by_role/<string:role_name>', methods=['GET'])
@@ -706,55 +705,6 @@ def get_conversations(user_id):
     cur.close()
     return jsonify(conversations_data)
 
-# @app.route('/get_conversations/<int:user_id>')
-# def get_conversations(user_id):
-#     cur = mysql.connection.cursor()
-#     # Ambil juga pesan terakhir dan waktunya untuk setiap percakapan
-#     # Ini bisa menjadi query yang lebih kompleks atau beberapa query.
-#     # Untuk kesederhanaan, kita akan modifikasi query yang ada dan tambahkan data pesan terakhir.
-#     # Anda mungkin perlu membuat kolom 'last_message_preview' dan 'last_message_time' di tabel 'conversations'
-#     # dan mengupdatenya setiap kali ada pesan baru. Atau, lakukan join.
-    
-#     # Query yang dimodifikasi untuk mengambil pesan terakhir (contoh, mungkin perlu optimasi)
-#     cur.execute("""
-#         SELECT 
-#             c.id, 
-#             c.status, 
-#             c.employee_id,
-#             c.technician_id,
-#             e.full_name as employee_name, 
-#             e.username as employee_username, -- TAMBAHKAN INI
-#             t.full_name as tech_name,
-#             t.status as tech_status,
-#             c.last_updated,
-#             m.message as last_message_preview,
-#             m.sent_at as last_message_time
-#         FROM conversations c
-#         JOIN users e ON c.employee_id = e.id
-#         LEFT JOIN users t ON c.technician_id = t.id
-#         LEFT JOIN messages m ON c.last_message_id = m.id
-#         WHERE c.employee_id = %s OR c.technician_id = %s
-#         ORDER BY c.last_updated DESC
-#     """, (user_id, user_id))
-    
-#     conversations_data = []
-#     for conv_row in cur.fetchall():
-#         conversations_data.append({
-#             'id': conv_row[0],
-#             'status': conv_row[1],
-#             'employee_id': conv_row[2],
-#             'technician_id': conv_row[3],
-#             'employee_name': conv_row[4],
-#             'employee_username': conv_row[5], # TAMBAHKAN INI
-#             'tech_name': conv_row[6] if conv_row[6] else 'Belum ditugaskan',
-#             'last_updated': conv_row[7].strftime('%Y-%m-%d %H:%M:%S') if conv_row[7] else None,
-#             'last_message_preview': conv_row[8] if conv_row[8] else "No messages yet.",
-#             'last_message_time': conv_row[9].strftime('%Y-%m-%d %H:%M:%S') if conv_row[9] else (conv_row[7].strftime('%Y-%m-%d %H:%M:%S') if conv_row[7] else None),
-#             'tech_status': conv_row[10] if conv_row[10] else 'Nonaktif'
-#         })
-#     cur.close()
-#     return jsonify(conversations_data)
-
 connected_users = {}
 
 @socketio.on('connect')
@@ -791,19 +741,33 @@ def handle_disconnect():
             print(f"SERVER_ERROR saat update status klien on disconnect: {e}")
     else:
         print(f"DEBUG: Klien anonim (session {request.sid}) terputus.")
-        
 
 
-@app.route('/get_messages/<int:conversation_id>')
-def get_messages(conversation_id):
+@app.route('/get_messages/<int:conversation_id>/<string:time>')
+def get_messages(conversation_id, time):
     cur = mysql.connection.cursor()
-    cur.execute("""
-        SELECT m.id, m.sender_id, u.full_name, m.message, m.sent_at, m.read_at, m.file_path
-        FROM messages m
-        JOIN users u ON m.sender_id = u.id
-        WHERE m.conversation_id = %s
-        ORDER BY m.sent_at
-    """, (conversation_id,))
+    
+    currDate = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    print(f"DEBUG: Server - current date for filtering: {currDate}")
+    if time == 'current':
+        cur.execute("""
+            SELECT m.id, m.sender_id, u.full_name, m.message, m.sent_at, m.read_at, m.file_path
+            FROM messages m
+            JOIN users u ON m.sender_id = u.id
+            WHERE m.conversation_id = %s AND m.sent_at >= %s
+            ORDER BY m.sent_at
+        """, (conversation_id, currDate))
+    elif time == 'all':
+        cur.execute("""
+            SELECT m.id, m.sender_id, u.full_name, m.message, m.sent_at, m.read_at, m.file_path
+            FROM messages m
+            JOIN users u ON m.sender_id = u.id
+            WHERE m.conversation_id = %s
+            ORDER BY m.sent_at
+        """, (conversation_id, ))
+    else:
+        cur.close()
+        return jsonify({'success': False, 'message': 'Invalid time parameter. Use "current" or "past".'}), 400
 
     messages = []
     for msg in cur.fetchall():
@@ -1365,18 +1329,18 @@ def delete_user_route(user_id_to_delete):
         
         user_role = user_to_delete_details[0]
         user_full_name = user_to_delete_details[1]
+        
+        if user_role == 'technician':
+            cur.execute("SELECT COUNT(*) FROM users WHERE role = 'technician'")
+            technician_count = cur.fetchone()[0]
+            if technician_count <= 1:
+                cur.close()
+                return jsonify({'success': False, 'message': 'Tidak bisa menghapus teknisi terakhir yang tersisa.'}), 400
 
-        if user_role != 'employee':
-            cur.close()
-            return jsonify({'success': False, 'message': f'Hanya user dengan peran "employee" yang bisa dihapus melalui endpoint ini. User ID {user_id_to_delete} adalah seorang "{user_role}".'}), 403 # Forbidden
-
-        # 2. Dapatkan semua ID percakapan di mana user ini adalah 'employee_id'
+        # 2. Dapatkan semua ID percakapan untuk message file fisik
         cur.execute("SELECT id FROM conversations WHERE employee_id = %s", (user_id_to_delete,))
         conversation_ids_tuples = cur.fetchall()
         conversation_ids_to_delete = [conv_tuple[0] for conv_tuple in conversation_ids_tuples]
-        
-        print(f"DEBUG: Server - Akan menghapus percakapan dengan ID: {conversation_ids_to_delete} yang terkait dengan user ID: {user_id_to_delete}")
-
         all_files_to_delete_on_disk = []
 
         if conversation_ids_to_delete:
@@ -1386,23 +1350,8 @@ def delete_user_route(user_id_to_delete):
                 files_in_conv = [row[0] for row in cur.fetchall()]
                 all_files_to_delete_on_disk.extend(files_in_conv)
 
-                # b. Atur last_message_id menjadi NULL di tabel conversations untuk percakapan ini
-                cur.execute("UPDATE conversations SET last_message_id = NULL WHERE id = %s", (conv_id,))
-                
-                # c. Hapus pesan dari percakapan ini
-                cur.execute("DELETE FROM messages WHERE conversation_id = %s", (conv_id,))
-                print(f"DEBUG: Server - Menghapus pesan dari percakapan ID: {conv_id}")
-
-            # d. Hapus semua percakapan yang terkait setelah pesannya dihapus
-            # Gunakan %s placeholder untuk setiap ID dalam list
-            format_strings = ','.join(['%s'] * len(conversation_ids_to_delete))
-            cur.execute(f"DELETE FROM conversations WHERE id IN ({format_strings})", tuple(conversation_ids_to_delete))
-            print(f"DEBUG: Server - Menghapus percakapan dengan ID: {conversation_ids_to_delete}")
-        
-        # 3. Hapus user itu sendiri dari tabel users
-        cur.execute("DELETE FROM users WHERE id = %s AND role = 'employee'", (user_id_to_delete,)) # Dobel cek role
-        deleted_user_count = cur.rowcount
-        print(f"DEBUG: Server - Menghapus {deleted_user_count} user dengan ID: {user_id_to_delete}")
+        # 3. Hapus User
+        cur.execute("DELETE FROM users WHERE id = %s", (user_id_to_delete,))
 
         mysql.connection.commit() # Commit transaksi jika semua query berhasil
 
@@ -1446,5 +1395,5 @@ if __name__ == '__main__':
     if not os.path.exists(app.config['UPLOAD_FOLDER']):
         os.makedirs(app.config['UPLOAD_FOLDER'])
     
-    start_scheduler()  # Mulai scheduler untuk pembersihan pesan mingguan
+    # start_scheduler()  # Mulai scheduler untuk pembersihan pesan mingguan
     socketio.run(app, debug=True, host='0.0.0.0', port=5000, use_reloader=False)
