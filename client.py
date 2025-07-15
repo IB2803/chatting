@@ -21,7 +21,7 @@ from PyQt5.QtGui import QColor,QKeyEvent, QFont, QPainter, QBrush, QPalette, QPi
 # Suppress font warnings
 os.environ['QT_LOGGING_RULES'] = 'qt.qpa.fonts=false'
 
-IP = "192.168.46.119" 
+IP = "192.168.47.134" 
 # IP = "192.168.1.7" 
 PORT = "5000"
 
@@ -192,6 +192,7 @@ class WebSocketThread(threading.Thread):
             
             # sio.wait() akan menjaga thread ini tetap aktif dan memproses event
             # sampai sio.disconnect() dipanggil atau koneksi terputus.
+            self.sio.emit('join', {'user_id': self.chat_window.user['id']}) 
             self.sio.wait()
             print("DEBUG: WebSocketThread (python-socketio) - sio.wait() telah berhenti/unblocked.")
 

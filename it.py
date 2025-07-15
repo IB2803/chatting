@@ -23,7 +23,7 @@ from PyQt5.QtGui import QColor,QKeyEvent, QFont, QPainter, QBrush, QPalette, QPi
 # Suppress font warnings
 os.environ['QT_LOGGING_RULES'] = 'qt.qpa.fonts=false'
 
-IP = "192.168.46.119"
+IP = "192.168.47.134"
 # IP = "192.168.1.5"
 PORT = "5000"
 
@@ -174,6 +174,12 @@ class WebSocketThread(threading.Thread):
             # Emit sinyal ke ChatWindow dengan payload ini.
             # Logika di ChatWindow.handle_received_message seharusnya sudah kompatibel.
             self.chat_window.receive_message_signal.emit(data)
+        
+        @self.sio.on('status_updated')
+        def on_status_updated(data):
+            print(f"DEBUG: IT/WebSocket - Menerima 'status_updated': {data}")
+            # Teruskan data ke sinyal di ChatWindow
+            self.chat_window.status_update_signal.emit(data)
 
     def run(self):
         # MODIFIKASI DI SINI: Tambahkan /socket.io/ pada URL
@@ -186,6 +192,7 @@ class WebSocketThread(threading.Thread):
             
             # sio.wait() akan menjaga thread ini tetap aktif dan memproses event
             # sampai sio.disconnect() dipanggil atau koneksi terputus.
+            self.sio.emit('join', {'user_id': self.chat_window.user['id']}) 
             self.sio.wait()
             print("DEBUG: WebSocketThread (python-socketio) - sio.wait() telah berhenti/unblocked.")
 
@@ -381,13 +388,15 @@ class ConversationItem(QWidget):
 class ChatWindow(QWidget):
     receive_message_signal = pyqtSignal(dict)
     new_conversation_signal = pyqtSignal(dict)
+    status_update_signal = pyqtSignal(dict)
     def __init__(self, user, parent=None):
         super().__init__(parent)
         self.user = user
         self.current_conversation = None
         self.unread_map = {} 
         self.message_cache = {}
-        self.setup_ui()     
+        self.setup_ui()
+        self.status_update_signal.connect(self.handle_status_updated)     
         
         # --- INISIALISASI SUARA NOTIFIKASI ---
         self.message_sound = QSoundEffect(self) # 'self' sebagai parent
@@ -942,6 +951,40 @@ class ChatWindow(QWidget):
             # Logika enable/disable untuk edit/hapus tech/ga akan ada di handlernya langsung
             self.action_edit_user.setEnabled(True)
             self.action_delete_user.setEnabled(True)
+
+    def handle_status_updated(self, data):
+        """Fungsi untuk menangani pembaruan status dari klien atau teknisi lain."""
+        updated_user_id = data.get('user_id')
+        new_status = data.get('status', 'Nonaktif')
+
+        if not updated_user_id:
+            return
+
+        # 1. Update data di semua item pada sidebar untuk konsistensi
+        for i in range(self.conversation_list.count()):
+            item = self.conversation_list.item(i)
+            widget = self.conversation_list.itemWidget(item)
+            if widget and hasattr(widget, 'conversation_data'):
+                # Jika user yang statusnya berubah adalah employee/klien
+                if widget.conversation_data.get('employee_id') == updated_user_id:
+                    widget.conversation_data['employee_status'] = new_status
+                # Jika user yang statusnya berubah adalah teknisi lain
+                if widget.conversation_data.get('technician_id') == updated_user_id:
+                    widget.conversation_data['tech_status'] = new_status
+        
+        # 2. Cek apakah chat yang sedang aktif adalah chat dengan user yang statusnya berubah
+        current_item = self.conversation_list.currentItem()
+        if current_item:
+            widget = self.conversation_list.itemWidget(current_item)
+            # Cek jika user yang diupdate adalah employee di chat aktif
+            if widget and widget.conversation_data.get('employee_id') == updated_user_id:
+                # Update label di header utama
+                self.chat_status.setText(f"● {new_status}")
+                if new_status.lower() == 'online':
+                    self.chat_status.setStyleSheet("color: #2ECC71; font-size: 13px;")
+                else:
+                    self.chat_status.setStyleSheet("color: #95A5A6; font-size: 13px;")
+
 
     def update_menu_actions_for_context(self):
         """Mengubah teks dan status aksi pada menu tiga titik berdasarkan konteks."""
@@ -1607,6 +1650,18 @@ class ChatWindow(QWidget):
         
         conv_data = conv_widget.conversation_data
 
+        # Tampilkan nama dan status klien
+        name = conv_data.get('employee_name', 'Employee')
+        employee_status = conv_data.get('employee_status', 'Nonaktif') # <--- AMBIL STATUS KLIEN
+
+        self.chat_name.setText(name)
+        self.chat_status.setText(f"● {employee_status}")
+        
+        if employee_status.lower() == 'online':
+            self.chat_status.setStyleSheet("color: #2ECC71; font-size: 13px;") # Hijau
+        else: # Nonaktif
+            self.chat_status.setStyleSheet("color: #95A5A6; font-size: 13px;")
+        
         # Aktifkan/Nonaktifkan aksi menu berdasarkan konteks
         self.action_edit_user.setEnabled(True)
         self.action_delete_user.setEnabled(True)
@@ -1616,8 +1671,8 @@ class ChatWindow(QWidget):
         else:
             name = conv_data.get('employee_name', 'Employee') #
         
-        self.chat_name.setText(name) #
-        self.chat_status.setText("🟢 Active now" if conv_data.get('status') != 'closed' else "⚫ Closed") #
+        # self.chat_name.setText(name) #
+        # self.chat_status.setText("🟢 Active now" if conv_data.get('status') != 'closed' else "⚫ Closed") #
         self.chat_avatar.setText(name[0].upper() if name else "?") #
         
         self.load_messages(conversation_id, scroll_to_bottom=True) # Muat pesan

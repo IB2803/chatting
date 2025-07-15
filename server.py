@@ -13,7 +13,7 @@ from werkzeug.utils import secure_filename
 from flask import Flask, request, jsonify, send_from_directory
 from apscheduler.schedulers.background import BackgroundScheduler
 
-IP = "192.168.46.119"
+IP = "192.168.47.134"
 # IP = "192.168.1.7"
 PORT = "5000"
 
@@ -589,9 +589,25 @@ def login():
     cur = mysql.connection.cursor()
     cur.execute("SELECT id, username, role, full_name FROM users WHERE username = %s AND role = 'employee'", (username,))
     user = cur.fetchone()
-    cur.close()
+    
 
     if user:
+        user_id = user[0]
+        try:
+            cur.execute("UPDATE users SET status = 'Online' WHERE id = %s", (user_id,))
+            mysql.connection.commit()
+            
+            # Siarkan juga status 'Online' ini ke semua pengguna lain
+            socketio.server.emit('status_updated', {
+                'user_id': user_id,
+                'status': 'Online'
+            })
+            print(f"DEBUG: Klien {user_id} login, status diubah menjadi 'Online' dan disiarkan.")
+        except Exception as e:
+            mysql.connection.rollback()
+            print(f"SERVER_ERROR saat update status klien on login: {e}")
+            
+        cur.close()
         return jsonify({
             'success': True,
             'user': {
@@ -601,6 +617,7 @@ def login():
                 'full_name': user[3]
             }
         })
+    cur.close()
     return jsonify({'success': False, 'message': 'Invalid credentials'})
 
 @app.route('/login_it', methods=['POST'])
@@ -620,10 +637,10 @@ def login_it():
             cur.execute("UPDATE users SET status = 'Online' WHERE id = %s", (user_id,))
             mysql.connection.commit()
             # Siarkan juga status 'Online' ini ke semua client
-            socketio.emit('status_updated', {
+            socketio.server.emit('status_updated', {
                 'user_id': user_id,
                 'status': 'Online'
-            }, broadcast=True)
+            })
             print(f"DEBUG: User {user_id} login, status diubah menjadi 'Online' dan disiarkan.")
         except Exception as e:
             mysql.connection.rollback()
@@ -659,7 +676,8 @@ def get_conversations(user_id):
             t.status as tech_status,
             c.last_updated,
             m.message as last_message_preview,
-            m.sent_at as last_message_time
+            m.sent_at as last_message_time,
+            e.status as employee_status
         FROM conversations c
         JOIN users e ON c.employee_id = e.id
         LEFT JOIN users t ON c.technician_id = t.id
@@ -682,7 +700,8 @@ def get_conversations(user_id):
             'tech_status': conv_row[7] if conv_row[7] else 'Nonaktif',               # <-- Ini indeks 7 yang baru
             'last_updated': conv_row[8].strftime('%Y-%m-%d %H:%M:%S') if conv_row[8] else None, # <-- jadi indeks 8
             'last_message_preview': conv_row[9] if conv_row[9] else "No messages yet.",     # <-- jadi indeks 9
-            'last_message_time': conv_row[10].strftime('%Y-%m-%d %H:%M:%S') if conv_row[10] else (conv_row[8].strftime('%Y-%m-%d %H:%M:%S') if conv_row[8] else None) # <-- jadi indeks 10 (dan 8 untuk fallback)
+            'last_message_time': conv_row[10].strftime('%Y-%m-%d %H:%M:%S') if conv_row[10] else (conv_row[8].strftime('%Y-%m-%d %H:%M:%S') if conv_row[8] else None), # <-- jadi indeks 10 (dan 8 untuk fallback)
+            'employee_status': conv_row[11]
         })
     cur.close()
     return jsonify(conversations_data)
@@ -735,6 +754,45 @@ def get_conversations(user_id):
 #         })
 #     cur.close()
 #     return jsonify(conversations_data)
+
+connected_users = {}
+
+@socketio.on('connect')
+def handle_connect():
+    print(f"DEBUG: Klien terhubung dengan session ID: {request.sid}")
+
+# Modifikasi event 'join' untuk menyimpan user_id
+@socketio.on('join')
+def on_join(data):
+    # ... (kode join yang sudah ada) ...
+    user_id = data.get('user_id')
+    if user_id:
+        connected_users[request.sid] = user_id
+        print(f"DEBUG: User {user_id} terhubung dengan session ID {request.sid}")
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    user_id = connected_users.pop(request.sid, None) # Ambil dan hapus user_id dari dictionary
+    if user_id:
+        print(f"DEBUG: Klien dengan user ID {user_id} (session {request.sid}) terputus.")
+        try:
+            with mysql.connection.cursor() as cur:
+                cur.execute("UPDATE users SET status = 'Nonaktif' WHERE id = %s", (user_id,))
+            mysql.connection.commit()
+            
+            # Siarkan status 'Nonaktif' ke semua pengguna lain
+            socketio.server.emit('status_updated', {
+                'user_id': user_id,
+                'status': 'Nonaktif'
+            })
+            print(f"DEBUG: Status klien {user_id} diubah menjadi 'Nonaktif' dan disiarkan.")
+        except Exception as e:
+            mysql.connection.rollback()
+            print(f"SERVER_ERROR saat update status klien on disconnect: {e}")
+    else:
+        print(f"DEBUG: Klien anonim (session {request.sid}) terputus.")
+        
+
 
 @app.route('/get_messages/<int:conversation_id>')
 def get_messages(conversation_id):
