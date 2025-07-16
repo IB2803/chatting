@@ -23,12 +23,39 @@ from PyQt5.QtGui import QColor,QKeyEvent, QFont, QPainter, QBrush, QPalette, QPi
 # Suppress font warnings
 os.environ['QT_LOGGING_RULES'] = 'qt.qpa.fonts=false'
 
-IP = "192.168.47.72"
-# IP = "192.168.1.5"
-PORT = "5000"
+# IP = "192.168.47.72"
+# PORT = "5000"
+# BASE_URL = f"http://{IP}:{PORT}"  
 
-# BASE_URL = "http://localhost:5000"
-BASE_URL = f"http://{IP}:{PORT}"  # Ganti <IP_KANTOR> dengan IP server
+def load_config():
+    """Memuat konfigurasi dari config.json."""
+    try:
+        # Menggunakan os.path.join untuk path yang lebih aman
+        config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
+        with open(config_path, 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        # Jika aplikasi sudah di-compile, path mungkin berbeda
+        try:
+            base_path = sys._MEIPASS
+            config_path = os.path.join(base_path, 'config.json')
+            with open(config_path, 'r') as f:
+                return json.load(f)
+        except Exception:
+            print("FATAL ERROR: config.json tidak ditemukan!")
+            sys.exit("File konfigurasi 'config.json' tidak ditemukan.")
+    except json.JSONDecodeError:
+        print("FATAL ERROR: Format 'config.json' salah!")
+        sys.exit("File konfigurasi 'config.json' rusak.")
+
+# Muat konfigurasi saat aplikasi dimulai
+config = load_config()
+IP = config.get("ip_address")
+PORT = config.get("port")
+
+# Hapus baris BASE_URL yang lama, ganti dengan ini
+BASE_URL = f"http://{IP}:{PORT}"
+
 
 def is_image_file(filename_or_path):
     if not filename_or_path:

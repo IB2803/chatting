@@ -1,0 +1,10 @@
+python-socketio[client]
+requests
+pyqt5
+
+eventlet
+flask
+flask_mysqldb
+flask_socketio
+flask_cors
+werkzeug

@@ -8,16 +8,42 @@ from flask_cors import CORS
 import hashlib
 import pandas as pd
 from datetime import datetime, timedelta
+import json
+import sys
 import os
 from werkzeug.utils import secure_filename
 from flask import Flask, request, jsonify, send_from_directory
 # from apscheduler.schedulers.background import BackgroundScheduler
 
-IP = "192.168.47.72"
-# IP = "192.168.1.7"
-PORT = "5000"
+# IP = "192.168.47.72"
+# PORT = "5000"
 
+def load_config():
+    """Memuat konfigurasi dari config.json."""
+    try:
+        # Menggunakan os.path.join untuk path yang lebih aman
+        config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
+        with open(config_path, 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        # Jika aplikasi sudah di-compile, path mungkin berbeda
+        try:
+            base_path = sys._MEIPASS
+            config_path = os.path.join(base_path, 'config.json')
+            with open(config_path, 'r') as f:
+                return json.load(f)
+        except Exception:
+            print("FATAL ERROR: config.json tidak ditemukan!")
+            sys.exit("File konfigurasi 'config.json' tidak ditemukan.")
+    except json.JSONDecodeError:
+        print("FATAL ERROR: Format 'config.json' salah!")
+        sys.exit("File konfigurasi 'config.json' rusak.")
 
+# Muat konfigurasi saat aplikasi dimulai
+config = load_config()
+IP = config.get("ip_address")
+PORT = config.get("port")
+BASE_URL = f"http://{IP}:{PORT}"
 
 app = Flask(__name__)
 CORS(app, resources={
@@ -1396,4 +1422,4 @@ if __name__ == '__main__':
         os.makedirs(app.config['UPLOAD_FOLDER'])
     
     # start_scheduler()  # Mulai scheduler untuk pembersihan pesan mingguan
-    socketio.run(app, debug=True, host='0.0.0.0', port=5000, use_reloader=False)
+    socketio.run(app, debug=True, host='0.0.0.0', port=int(PORT), use_reloader=False)
