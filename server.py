@@ -1,139 +1,64 @@
 import eventlet
 eventlet.monkey_patch()  # Patch untuk mendukung Socket.IO dengan Flask
 
-from flask import Flask, request, jsonify
-from flask_mysqldb import MySQL
-from flask_socketio import SocketIO
-from flask_cors import CORS
+import os
 import hashlib
 import pandas as pd
-from datetime import datetime, timedelta
-import os
-from werkzeug.utils import secure_filename
+import socket
+import threading
+
 from flask import Flask, request, jsonify, send_from_directory
+from flask_socketio import SocketIO
+from flask_mysqldb import MySQL
+from flask_cors import CORS
+from datetime import datetime, timedelta
+from werkzeug.utils import secure_filename
 # from apscheduler.schedulers.background import BackgroundScheduler
 
-IP = "192.168.47.72"
+# IP = "192.168.47.72"
 # IP = "192.168.1.7"
 PORT = "5000"
-
-
+DISCOVERY_PORT = 60000 # Port untuk discovery service
 
 app = Flask(__name__)
 CORS(app, resources={
     r"/*": {
-        "origins": [f"http://localhost:{PORT}", f"http://{IP}:{PORT}"]
+        "origins": "*",  # Izinkan semua origin untuk pengembangan
     }
 })
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # MySQL configuration
-app.config['MYSQL_HOST'] = IP
+app.config['MYSQL_HOST'] = 'localhost'
 app.config['MYSQL_USER'] = 'root'
 app.config['MYSQL_PASSWORD'] = ''
 app.config['MYSQL_DB'] = 'it_support_chat'
 
 mysql = MySQL(app)
 
-
-def cleanup_old_messages_job():
-    print(f"[{datetime.now()}] Menjalankan job terjadwal: Pembersihan pesan mingguan (Skenario B).")
-    # Pastikan kita memiliki konteks aplikasi Flask
-    with app.app_context():
-        cur = None
-        try:
-            cur = mysql.connection.cursor()
-            
-            today = datetime.now()
-            # Job ini dijadwalkan berjalan pada hari Minggu.
-            # Kita ingin menghapus semua pesan SEBELUM hari Senin dari minggu yang baru saja berakhir.
-            # today.weekday(): Senin=0, Selasa=1, ..., Minggu=6.
-            # Jika hari ini Minggu (weekday == 6), Senin minggu ini adalah (today - timedelta(days=6)).
-            # Ini adalah batas tanggalnya. Pesan SEBELUM tanggal ini akan dihapus.
-            start_of_current_week_monday = today - timedelta(days=today.weekday()) 
-            cleanup_threshold_date = start_of_current_week_monday.replace(hour=0, minute=0, second=0, microsecond=0)
-            
-            cleanup_threshold_date_str = cleanup_threshold_date.strftime('%Y-%m-%d %H:%M:%S')
-            print(f"DEBUG: Cleanup (Skenario B) - Akan menghapus semua pesan yang dikirim sebelum {cleanup_threshold_date_str}.")
-
-            # Langkah 1: Atur last_message_id menjadi NULL di tabel conversations
-            # untuk pesan-pesan yang akan dihapus agar tidak melanggar foreign key.
-            sql_update_conversations = """
-                UPDATE conversations c
-                SET c.last_message_id = NULL
-                WHERE c.last_message_id IS NOT NULL AND c.last_message_id IN (
-                    SELECT id FROM messages WHERE sent_at < %s
-                );
-            """
-            cur.execute(sql_update_conversations, (cleanup_threshold_date_str,))
-            updated_convs_count = cur.rowcount
-            print(f"DEBUG: Cleanup (Skenario B) - last_message_id di-NULL-kan untuk {updated_convs_count} percakapan.")
-
-            # Langkah 2: Ambil daftar file_path dari pesan lama yang akan dihapus (jika ada)
-            sql_select_files = """
-                SELECT file_path FROM messages 
-                WHERE sent_at < %s AND file_path IS NOT NULL AND file_path != ''
-            """
-            cur.execute(sql_select_files, (cleanup_threshold_date_str,))
-            files_to_delete_on_disk = [row[0] for row in cur.fetchall()]
-            print(f"DEBUG: Cleanup (Skenario B) - Menemukan {len(files_to_delete_on_disk)} file untuk potensi penghapusan dari disk.")
-
-            # Langkah 3: Hapus pesan lama dari tabel messages
-            sql_delete_messages = "DELETE FROM messages WHERE sent_at < %s;"
-            cur.execute(sql_delete_messages, (cleanup_threshold_date_str,))
-            deleted_messages_count = cur.rowcount
-            print(f"DEBUG: Cleanup (Skenario B) - {deleted_messages_count} pesan lama berhasil dihapus dari database.")
-            
-            mysql.connection.commit()
-            print(f"DEBUG: Cleanup (Skenario B) - Transaksi database di-commit.")
-
-            # # Langkah 4: (Opsional) Hapus file fisik dari folder 'uploads'
-            # if files_to_delete_on_disk:
-            #     upload_folder = app.config.get('UPLOAD_FOLDER', 'uploads')
-            #     for filename in files_to_delete_on_disk:
-            #         try:
-            #             file_location = os.path.join(upload_folder, filename)
-            #             if os.path.exists(file_location):
-            #                 os.remove(file_location)
-            #                 print(f"DEBUG: Cleanup (Skenario B) - File fisik '{filename}' berhasil dihapus.")
-            #             # else:
-            #                 # print(f"DEBUG: Cleanup (Skenario B) - File fisik '{filename}' tidak ditemukan di disk.")
-            #         except Exception as e_file_delete:
-            #             print(f"DEBUG: Cleanup (Skenario B) - Error saat menghapus file fisik '{filename}': {e_file_delete}")
-            
-            print(f"[{datetime.now()}] Scheduled job: Pembersihan pesan mingguan (Skenario B) selesai.")
-
-        except Exception as e:
-            if cur:
-                mysql.connection.rollback()
-            print(f"[{datetime.now()}] ERROR selama pembersihan pesan mingguan terjadwal (Skenario B): {e}")
-        finally:
-            if cur:
-                cur.close()
-
-# def start_scheduler():
-#     scheduler = BackgroundScheduler(daemon=True)
-#     # Jalankan job cleanup_old_messages_job:
-#     # 'cron' digunakan untuk jadwal yang lebih spesifik.
-#     # day_of_week='sun' berarti setiap hari Minggu.
-#     # hour=1, minute=0 berarti jam 01:00 pagi.
-
-#     scheduler.add_job(
-#         cleanup_old_messages_job, 
-#         trigger='cron', 
-#         day_of_week='sun',  # 0=Senin, 1=Selasa, ..., 6=Minggu ATAU 'sun', 'mon', etc.
-#         hour=1,             # Jam 1 pagi
-#         minute=0,           # Menit ke-0
-#         misfire_grace_time=3600 # Toleransi jika server down saat jadwal (1 jam)
-#     )
-    
-#     try:
-#         scheduler.start()
-#         print("APScheduler untuk pembersihan pesan mingguan (setiap Minggu pukul 01:00) telah dimulai.")
-#     except Exception as e_scheduler:
-#         print(f"Error starting APScheduler: {e_scheduler}")
-
-
+def discovery_service():
+    """
+    Fungsi ini berjalan di thread terpisah.
+    Mendengarkan broadcast UDP di port DISCOVERY_PORT.
+    Jika menerima pesan 'DISCOVER_ITHELPDESK_SERVER',
+    ia akan membalas ke pengirim dengan pesan konfirmasi.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        # Bind ke semua network interface yang tersedia
+        s.bind(('', DISCOVERY_PORT))
+        print(f"✅ Layanan penemuan (Discovery Service) berjalan di port {DISCOVERY_PORT} (UDP)")
+        while True:
+            try:
+                data, addr = s.recvfrom(1024)
+                print(f"🔍 Menerima data dari {addr}: {data}")
+                if data == b'DISCOVER_ITHELPDESK_SERVER':
+                    print(f"Menerima permintaan penemuan dari {addr}")
+                    # Balas ke alamat pengirim dengan pesan konfirmasi dan port Socket.IO
+                    response_message = f'ITHELPDESK_SERVER_AT_PORT_{PORT}'.encode('utf-8')
+                    s.sendto(response_message, addr)
+            except Exception as e:
+                print(f"Error di discovery_service: {e}")
 
 # Helper function
 def hash_password(password):
@@ -264,83 +189,6 @@ def update_employee(user_id):
         print(f"SERVER_ERROR di /update_employee/{user_id}: {e}")
         return jsonify({'success': False, 'message': f'Error pada server: {e}'}), 500
 
-
-
-# @app.route('/delete_support_user/<int:user_id>', methods=['DELETE'])
-# def delete_support_user(user_id):
-#     """Endpoint untuk menghapus support staff (technician/ga)."""
-#     cur = None
-#     try:
-#         cur = mysql.connection.cursor()
-
-#         # 1. Validasi: Pastikan user ada dan merupakan support staff
-#         cur.execute("SELECT role, full_name FROM users WHERE id = %s", (user_id,))
-#         user_to_delete = cur.fetchone()
-#         if not user_to_delete:
-#             cur.close()
-#             return jsonify({'success': False, 'message': 'User tidak ditemukan.'}), 404
-        
-#         role, full_name = user_to_delete
-#         if role not in ['technician', 'ga']:
-#             cur.close()
-#             return jsonify({'success': False, 'message': 'Hanya role technician atau GA yang bisa dihapus.'}), 403
-
-#         # 2. Validasi Keamanan: Jangan biarkan teknisi terakhir dihapus
-#         if role == 'technician':
-#             cur.execute("SELECT COUNT(*) FROM users WHERE role = 'technician'")
-#             technician_count = cur.fetchone()[0]
-#             if technician_count <= 1:
-#                 cur.close()
-#                 return jsonify({'success': False, 'message': 'Tidak bisa menghapus teknisi terakhir yang tersisa.'}), 400
-
-#         # 3. Penanganan Percakapan: Set technician_id menjadi NULL pada percakapan yang ditangani
-#         #    Ini akan membuat tiket menjadi "unassigned" daripada menghapus seluruh percakapan.
-#         # cur.execute("UPDATE conversations SET technician_id = NULL WHERE technician_id = %s", (user_id,))
-                
-#         cur.execute("SELECT id FROM conversations WHERE employee_id = %s OR technician_id = %s", (user_id, user_id))
-#         conversation_ids_tuples = cur.fetchall()
-#         conversation_ids_to_delete = [conv_tuple[0] for conv_tuple in conversation_ids_tuples]
-                
-#         all_files_to_delete_on_disk = []
-#         print(f"Debug Tes delete SERVER")
-
-#         if conversation_ids_to_delete:
-#             for conv_id in conversation_ids_to_delete:
-#                 # a. (Opsional) Ambil file_path dari pesan yang akan dihapus
-#                 cur.execute("SELECT file_path FROM messages WHERE conversation_id = %s AND file_path IS NOT NULL", (conv_id,))
-#                 files_in_conv = [row[0] for row in cur.fetchall()]
-#                 all_files_to_delete_on_disk.extend(files_in_conv)
-
-#                 # print(f"DEBUG: {cur.rowcount} percakapan yang ditangani oleh user {user_id} telah di-unassign.")
-#                 # b. Atur last_message_id menjadi NULL di tabel conversations untuk percakapan ini
-#                 cur.execute("UPDATE conversations SET last_message_id = NULL WHERE id = %s", (conv_id,))
-                 
-#                 # c. Hapus pesan dari percakapan ini
-#                 cur.execute("DELETE FROM messages WHERE conversation_id = %s", (conv_id,))
-#                 print(f"DEBUG: Server - Menghapus pesan dari percakapan ID: {conv_id}")
-
-#             # d. Hapus semua percakapan yang terkait setelah pesannya dihapus
-#             # Gunakan %s placeholder untuk setiap ID dalam list
-#             format_strings = ','.join(['%s'] * len(conversation_ids_to_delete))
-#             cur.execute(f"DELETE FROM conversations WHERE id IN ({format_strings})", tuple(conversation_ids_to_delete))
-#             print(f"DEBUG: Server - Menghapus percakapan dengan ID: {conversation_ids_to_delete}")
-
-#         # 4. Hapus User
-#         cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
-        
-#         mysql.connection.commit()
-#         cur.close()
-        
-#         return jsonify({'success': True, 'message': f'Support staff {full_name} berhasil dihapus.'})
-
-#     except Exception as e:
-#         if cur:
-#             mysql.connection.rollback()
-#             cur.close()
-#         print(f"SERVER_ERROR di /delete_support_user/{user_id}: {e}")
-#         return jsonify({'success': False, 'message': f'Error pada server: {e}'}), 500
-
-
 @app.route('/get_users_by_role/<string:role_name>', methods=['GET'])
 def get_users_by_role(role_name):
     # Untuk CreateConversationDialog, client memanggil untuk 'employee' dan 'technician'.
@@ -386,42 +234,6 @@ def get_users_by_role(role_name):
         # Ini akan mencetak error Python asli ke konsol server, sangat berguna untuk debugging!
         print(f"SERVER_ERROR di /get_users_by_role untuk role '{role_name}': {e}") 
         return jsonify({'success': False, 'message': f'Gagal mengambil pengguna: {str(e)}'}), 500
-# @app.route('/get_users_by_role/<string:role_name>', methods=['GET'])
-# def get_users_by_role(role_name):
-#     # Isi fungsi seperti yang sudah kita diskusikan sebelumnya
-#     if role_name not in ['employee', 'technician', 'ga']:
-#         return jsonify({'success': False, 'message': 'Invalid role specified'}), 400
-
-#     cur = mysql.connection.cursor()
-#     try:
-#         query_sql = "SELECT id, full_name FROM users WHERE "
-#         params = []
-
-#         if role_name == 'technician':
-#             # Jika client meminta 'technician', berikan daftar semua yang bisa jadi support
-#             query_sql += "(role = %s )"
-#             params.extend('technician')
-#         elif role_name == 'employee':
-#             query_sql += "role = %s"
-#             params.append('employee')
-#         # Jika Anda menambahkan 'ga' ke allowed_roles_for_path dan ingin endpoint khusus untuk list GA:
-#         elif role_name == 'ga':
-#             query_sql += "role = %s"
-#             params.append('ga')
-#         else:
-#             # Ini seharusnya tidak terjadi jika validasi di atas sudah benar
-#             cur.close()
-#             return jsonify({'success': False, 'message': 'Internal server error: Unhandled role for query construction.'}), 500
-
-#         query_sql += " ORDER BY full_name ASC"
-#         cur.execute(query_sql, tuple(params))
-#         users = [{'id': row[0], 'full_name': row[1]} for row in cur.fetchall()]
-#         cur.close()
-#         return jsonify({'success': True, 'users': users})
-#     except Exception as e:
-#         cur.close()
-#         print(f"Error fetching users by role (custom logic) {role_name}: {e}")
-#         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/admin_create_conversation', methods=['POST'])
 def admin_create_conversation():
@@ -547,38 +359,6 @@ def update_status():
         mysql.connection.rollback()
         print(f"SERVER_ERROR di /update_status: {e}")
         return jsonify({'success': False, 'message': f'Error pada server: {str(e)}'}), 500
-
-# @app.route('/update_status', methods=['POST'])
-# def update_status():
-#     data = request.get_json()
-#     user_id = data.get('user_id')
-#     new_status = data.get('status')
-
-#     if not user_id or not new_status:
-#         return jsonify({'success': False, 'message': 'User ID dan status baru diperlukan.'}), 400
-
-#     cur = None
-#     try:
-#         cur = mysql.connection.cursor()
-#         # Perintah UPDATE ini akan bekerja karena kolom 'status' sudah ada
-#         cur.execute("UPDATE users SET status = %s WHERE id = %s", (new_status, user_id))
-#         mysql.connection.commit()
-#         cur.close()
-
-#         # PENTING: Siarkan perubahan status ke semua klien yang terhubung!
-#         socketio.emit('status_updated', {
-#             'user_id': user_id,
-#             'status': new_status
-#         }, broadcast=True)
-#         print(f"DEBUG: Status user {user_id} diubah menjadi '{new_status}' dan disiarkan.")
-
-#         return jsonify({'success': True, 'message': 'Status berhasil diperbarui.'})
-#     except Exception as e:
-#         if cur:
-#             mysql.connection.rollback()
-#             cur.close()
-#         print(f"SERVER_ERROR di /update_status: {e}")
-#         return jsonify({'success': False, 'message': f'Error pada server: {e}'}), 500
 
 @app.route('/login', methods=['POST'])
 def login():
@@ -1395,5 +1175,9 @@ if __name__ == '__main__':
     if not os.path.exists(app.config['UPLOAD_FOLDER']):
         os.makedirs(app.config['UPLOAD_FOLDER'])
     
+    discovery_thread = threading.Thread(target=discovery_service, daemon=True)
+    discovery_thread.start()
+
     # start_scheduler()  # Mulai scheduler untuk pembersihan pesan mingguan
+    print(f"🚀 Server utama Socket.IO akan berjalan di port {PORT} (TCP)")
     socketio.run(app, debug=True, host='0.0.0.0', port=5000, use_reloader=False)

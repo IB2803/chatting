@@ -1,14 +1,14 @@
+import pandas as pd
+import threading
+import requests
+import socketio
+import socket
+import json
+import time
 import sys
 import os
-import requests
-import json
-import threading
-import time
-import socketio
-import pandas as pd
 
 from PyQt5.QtMultimedia import QSoundEffect
-from PyQt5.QtWidgets import QFileDialog
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QListWidget, QTextEdit,
@@ -23,12 +23,44 @@ from PyQt5.QtGui import QColor,QKeyEvent, QFont, QPainter, QBrush, QPalette, QPi
 # Suppress font warnings
 os.environ['QT_LOGGING_RULES'] = 'qt.qpa.fonts=false'
 
-IP = "192.168.47.72"
+# IP = "192.168.47.72"
 # IP = "192.168.1.5"
-PORT = "5000"
+SERVER_IP = None
+SERVER_PORT = None
+BASE_URL = None
+DISCOVERY_PORT = 60000 # Port untuk discovery service
 
 # BASE_URL = "http://localhost:5000"
-BASE_URL = f"http://{IP}:{PORT}"  # Ganti <IP_KANTOR> dengan IP server
+# BASE_URL = f"http://{IP}:{PORT}"  # Ganti <IP_KANTOR> dengan IP server
+
+def find_server():
+    """
+    Mengirim broadcast UDP untuk menemukan server.
+    Mengembalikan tuple (ip, port) jika ditemukan, atau (None, None) jika gagal.
+    """
+    global SERVER_IP, SERVER_PORT, BASE_URL
+    print("Mencari server helpdesk di jaringan...")
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        s.settimeout(3) # Tunggu balasan selama 3 detik
+        try:
+            s.sendto(b'DISCOVER_ITHELPDESK_SERVER', ('<broadcast>', DISCOVERY_PORT))
+            data, addr = s.recvfrom(1024)
+            response_str = data.decode('utf-8')
+            if response_str.startswith('ITHELPDESK_SERVER_AT_PORT_'):
+                port = response_str.split('_')[-1]
+                SERVER_IP = addr[0]
+                SERVER_PORT = int(port)
+                BASE_URL = f"http://{SERVER_IP}:{SERVER_PORT}"
+                print(f"✅ Server ditemukan di: {BASE_URL}")
+                return SERVER_IP, SERVER_PORT
+        except socket.timeout:
+            print("❌ Tidak ada server yang merespons. Pencarian gagal.")
+            return None, None
+        except Exception as e:
+            print(f"Error saat mencari server: {e}")
+            return None, None
+    return None, None
 
 def is_image_file(filename_or_path):
     if not filename_or_path:
@@ -135,21 +167,12 @@ class WebSocketThread(threading.Thread):
     def __init__(self, chat_window):
         super().__init__()
         self.chat_window = chat_window
-        
         self.sio = socketio.Client(logger=True, engineio_logger=True)
         self.setup_event_handlers()
-        
         self.running = True
         
     def setup_event_handlers(self):
         # Handler untuk event koneksi berhasil
-        @self.sio.on('conversation_created') # Event baru dari server
-        def on_conversation_created(data):
-            print(f"DEBUG: WebSocketThread (python-socketio) - Menerima 'conversation_created': {data}")
-            # Emit sinyal ke ChatWindow dengan payload ini.
-            # ChatWindow akan membutuhkan metode baru untuk menangani ini.
-            self.chat_window.new_conversation_signal.emit(data) # Buat sinyal baru
-
         @self.sio.event
         def connect():
             print("DEBUG: WebSocketThread (python-socketio) - Terhubung ke server Socket.IO!")
@@ -183,28 +206,31 @@ class WebSocketThread(threading.Thread):
 
     def run(self):
         # MODIFIKASI DI SINI: Tambahkan /socket.io/ pada URL
-        print(f"DEBUG: WebSocketThread (python-socketio) - Mencoba terhubung ke http://{IP}:{PORT}")
-        try:
-            # Lakukan koneksi. Pustaka akan menangani handshake Engine.IO/Socket.IO.
-            # Ia akan mencoba path default /socket.io/
-            # 'transports=['websocket']' memaksa penggunaan WebSocket.
-            self.sio.connect(f"http://{IP}:{PORT}", transports=['websocket'])
-            
-            # sio.wait() akan menjaga thread ini tetap aktif dan memproses event
-            # sampai sio.disconnect() dipanggil atau koneksi terputus.
-            self.sio.emit('join', {'user_id': self.chat_window.user['id']}) 
-            self.sio.wait()
-            print("DEBUG: WebSocketThread (python-socketio) - sio.wait() telah berhenti/unblocked.")
+        if BASE_URL:
+            try:
+                # Lakukan koneksi. Pustaka akan menangani handshake Engine.IO/Socket.IO.
+                # Ia akan mencoba path default /socket.io/
+                # 'transports=['websocket']' memaksa penggunaan WebSocket.
+                self.sio.connect(BASE_URL, transports=['websocket'])
+                
+                # sio.wait() akan menjaga thread ini tetap aktif dan memproses event
+                # sampai sio.disconnect() dipanggil atau koneksi terputus.
+                self.sio.emit('join', {'user_id': self.chat_window.user['id']}) 
+                self.sio.wait()
+                print("DEBUG: WebSocketThread (python-socketio) - sio.wait() telah berhenti/unblocked.")
 
-        except socketio.exceptions.ConnectionError as e:
-            print(f"DEBUG: WebSocketThread (python-socketio) - Kesalahan koneksi: {e}")
-        except Exception as e_run:
-            # Tangkap error lain yang mungkin terjadi selama run
-            print(f"DEBUG: WebSocketThread (python-socketio) - Error tak terduga di run(): {e_run}")
-        finally:
-            # Ini mungkin tidak akan tercapai jika sio.wait() berjalan terus atau jika error tidak tertangkap
-            # Penutupan koneksi utama ada di metode stop().
-            print("DEBUG: WebSocketThread (python-socketio) - Thread 'run' selesai atau keluar dari try-except.")
+            except socketio.exceptions.ConnectionError as e:
+                print(f"DEBUG: WebSocketThread (python-socketio) - Kesalahan koneksi: {e}")
+            except Exception as e_run:
+                # Tangkap error lain yang mungkin terjadi selama run
+                print(f"DEBUG: WebSocketThread (python-socketio) - Error tak terduga di run(): {e_run}")
+            finally:
+                # Ini mungkin tidak akan tercapai jika sio.wait() berjalan terus atau jika error tidak tertangkap
+                # Penutupan koneksi utama ada di metode stop().
+                print("DEBUG: WebSocketThread (python-socketio) - Thread 'run' selesai atau keluar dari try-except.")
+        else:
+            print("WebSocket: Tidak bisa memulai koneksi, BASE_URL belum diatur.")
+
 
     def stop(self):
         print("DEBUG: WebSocketThread (python-socketio) - Metode stop() dipanggil.")
@@ -2741,17 +2767,20 @@ class LoginWindow(QWidget):
     def __init__(self):
         super().__init__()
         
-        self.settings = QSettings("MyCompany", "ITChat") 
+        # self.settings = QSettings("MyCompany", "ITChat") 
+        self.settings = QSettings("MyCompany", "ITChatIT") 
         self.saved_accounts = [] # Untuk menyimpan daftar akun yang dimuat
         self.setup_ui()
         self.load_saved_accounts_to_combo() # Muat login yang tersimpan
         self.load_saved_account()  
+        
+        self.find_server_in_background()
+
     
     def setup_ui(self):
         self.setWindowTitle("Login - IT Chat (Teknisi)")
         # self.setFixedSize(480, 800)
         self.resize(480, 750)
-        
         
         # Main container
         main_layout = QVBoxLayout()
@@ -2907,9 +2936,6 @@ class LoginWindow(QWidget):
         form_layout.addWidget(self.accounts_combo)
         # --- End Saved Accounts ComboBox ---
         
-        
-        
-        
         # Welcome text
         welcome_label = QLabel("Welcome back!")
         welcome_label.setStyleSheet("""
@@ -2931,6 +2957,12 @@ class LoginWindow(QWidget):
             }
         """)
         form_layout.addWidget(welcome_sub)
+        
+        # --- PENAMBAHAN BARU: Label status pencarian server ---
+        self.server_status_label = QLabel("🔍 Mencari server di jaringan...")
+        self.server_status_label.setAlignment(Qt.AlignCenter)
+        self.server_status_label.setStyleSheet("color: #7f8c8d; font-style: italic; margin-bottom: 10px;")
+        form_layout.addWidget(self.server_status_label)
         
         # Username input
         username_label = QLabel("Email ")
@@ -2999,9 +3031,9 @@ class LoginWindow(QWidget):
         # --- End Remember Me Checkbox ---
         
         # Login button
-        login_btn = QPushButton("Sign In")
-        login_btn.clicked.connect(self.handle_login)
-        login_btn.setStyleSheet("""
+        self.login_btn = QPushButton("Sign In")
+        self.login_btn.clicked.connect(self.handle_login)
+        self.login_btn.setStyleSheet("""
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
                     stop:0 #4A90E2, stop:1 #357ABD);
@@ -3021,7 +3053,7 @@ class LoginWindow(QWidget):
                 background: #2E6DA4;
             }
         """)
-        form_layout.addWidget(login_btn)
+        form_layout.addWidget(self.login_btn)
         
         # Error label
         self.error_label = QLabel()
@@ -3065,6 +3097,23 @@ class LoginWindow(QWidget):
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             }
         """)
+        
+    def find_server_in_background(self):
+        # Gunakan QTimer untuk menjalankan find_server agar tidak memblokir UI
+        QTimer.singleShot(100, self._execute_find_server)
+
+    def _execute_find_server(self):
+        ip, port = find_server()
+        if ip and port:
+            self.server_status_label.setText(f"✅ Server ditemukan di {ip}:{port}")
+            self.server_status_label.setStyleSheet("color: #27ae60; font-weight: bold;")
+            self.login_btn.setEnabled(True)
+            self.login_btn.setToolTip("")
+        else:
+            self.server_status_label.setText("❌ Server tidak ditemukan. Pastikan server aktif.")
+            self.server_status_label.setStyleSheet("color: #c0392b; font-weight: bold;")
+            self.login_btn.setEnabled(False)
+            self.login_btn.setToolTip("Tombol login nonaktif karena server tidak ditemukan di jaringan.")
     
     def load_saved_accounts_to_combo(self):
         self.accounts_combo.blockSignals(True) # Blokir sinyal agar tidak trigger saat mengisi
