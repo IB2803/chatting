@@ -2653,11 +2653,13 @@ class AddUserDialog(QDialog):
         <b>Panduan Menambah User Baru</b>
         <p>Formulir ini digunakan untuk mendaftarkan pengguna baru ke dalam sistem chat.</p>
         <ul>
-            <li><b>Role:</b> Pilih peran untuk pengguna baru. 'Employee' adalah klien biasa, sedangkan 'Technician' dan 'GA' adalah staf pendukung.</li>
-            <li><b>Nomor Induk Pegawai:</b> Masukkan NIK atau username unik yang akan digunakan untuk login. Wajib diisi.</li>
+            <li><b>Role:</b> Pilih peran pengguna. 'Employee' adalah klien biasa, sedangkan 'Technician' dan 'GA' adalah staf admin.</li>
+            <li><b>Nomor Induk Pegawai:</b> Masukkan NIK atau email unik yang akan digunakan untuk login. Wajib diisi.</li>
             <li><b>Full Name:</b> Masukkan nama lengkap pengguna yang akan ditampilkan di chat.</li>
             <li><b>Password:</b> Wajib diisi untuk role 'Technician' dan 'GA'. Untuk 'Employee', kolom ini akan disembunyikan.</li>
-            <li><b>Bulk Add from File:</b> Digunakan untuk menambah banyak pengguna sekaligus dari sebuah file Excel atau CSV.</li>
+            <li><b>Bulk Add from File:</b> Digunakan untuk menambah banyak pengguna sekaligus dari file Excel atau CSV.</li>
+            <li><b>Format File:</b> File harus memiliki kolom: <code>nip, full_name, role, password</code>.</li>
+            <li><b>Catatan:</b> Password wajib diisi untuk role 'Technician' dan 'GA', dan dikosongkan untuk 'Employee'.</li>
         </ul>
         """
         QMessageBox.information(self, "Bantuan - Tambah User", help_text)
