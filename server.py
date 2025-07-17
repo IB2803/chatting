@@ -850,7 +850,7 @@ def bulk_add_users():
         cur = mysql.connection.cursor()
         
         for index, row in df.iterrows():
-            username = str(row.get('username', '')).strip()
+            username = str(row.get('nip', '')).strip()
             full_name = str(row.get('full_name', '')).strip()
             role = str(row.get('role', '')).strip().lower()
             password = str(row.get('password', '')) if not pd.isna(row.get('password')) else None

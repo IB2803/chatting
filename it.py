@@ -1671,7 +1671,14 @@ class ChatWindow(QWidget):
             return
         self.update_chat_input_active_state(True)
         self.back_button.setVisible(True)
+        
+        if self.user['role'] == 'technician':
+            self.chat_options_button.show() # Selalu tampilkan untuk teknisi
+        else:
+            self.chat_options_button.hide() # Sembunyikan untuk peran lain (jika ada)
+        
         self.show_past_messages.show()
+        self.show_past_messages.setText("Show Previous Messages")
         self.show_past_messages.setChecked(True)
         conversation_id = item.data(Qt.UserRole)
         print(f"DEBUG: ChatWindow - Memilih percakapan ID: {conversation_id}") # DEBUG
@@ -1683,9 +1690,6 @@ class ChatWindow(QWidget):
         if not conv_widget:
             print(f"DEBUG: ChatWindow - Tidak ada widget untuk item percakapan ID: {conversation_id}") # DEBUG
             return
-
-        # Tampilkan tombol menu karena percakapan dipilih
-        self.chat_options_button.show() 
         
         conv_data = conv_widget.conversation_data
 
@@ -1764,6 +1768,10 @@ class ChatWindow(QWidget):
         self.update_menu_actions_for_context() # PANGGIL DI SINI
         self.show_past_messages.hide()
         
+        if self.user['role'] == 'technician':
+            self.chat_options_button.show() # Selalu tampilkan untuk teknisi
+        else:
+            self.chat_options_button.hide() # Sembunyikan untuk peran lain (jika ada)
 
         # 5. (Opsional) Hapus sorotan dari QListWidget jika ada
         if self.conversation_list.currentItem():
@@ -2756,13 +2764,14 @@ class AddUserDialog(QDialog):
     def update_password_visibility(self): # Ganti nama metode
         current_role = self.role_combo.currentText()
         if current_role == 'employee':
-            # self.password_label.setText("Password (Opsional untuk Employee):") # Teks bisa tetap ada
-            # self.password_input.setPlaceholderText("Biarkan kosong jika tidak ada password")
-            # self.password_input.setVisible(True) # Tetap visible, tapi opsional
-            # Jika ingin benar-benar menyembunyikan:
+            self.username_label.setText(f"Nomor Induk Pegawai:")
+            self.username_input.setPlaceholderText("Enter NIK (Nomor Induk Pegawai)")
+            
             self.password_label.setVisible(False)
             self.password_input.setVisible(False)
         else: # technician atau ga
+            self.username_label.setText(f"Email:")
+            self.username_input.setPlaceholderText("Enter Email")
             self.password_label.setText(f"Password (Wajib untuk {current_role.title()}):")
             self.password_input.setPlaceholderText("Masukkan password")
             self.password_label.setVisible(True)
