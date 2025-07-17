@@ -10,13 +10,13 @@ import os
 
 from PyQt5.QtMultimedia import QSoundEffect
 from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QWhatsThis,
     QLabel, QLineEdit, QPushButton, QListWidget, QTextEdit,
     QScrollArea, QFrame, QSizePolicy, QListWidgetItem, QGraphicsDropShadowEffect,
     QFileDialog, QMessageBox, QComboBox, QDialog, QCheckBox, QSpacerItem, QSizePolicy, QToolButton, QMenu, QStyle
 )
 from PyQt5.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply # Untuk memuat gambar secara asinkron
-from PyQt5.QtCore import QSettings, pyqtSignal, Qt, QTimer, QUrl, QMimeData, QDir, QStandardPaths, QThread, QObject
+from PyQt5.QtCore import QSettings, pyqtSignal, Qt, QTimer, QUrl, QMimeData, QDir, QStandardPaths, QThread, QObject, QEvent
 from PyQt5.QtGui import QColor,QKeyEvent, QFont, QPainter, QBrush, QPalette, QPixmap, QIcon, QDesktopServices, QImage
 
 
@@ -2534,6 +2534,10 @@ class AddUserDialog(QDialog):
         self.parent_window = parent_window
         self.setWindowTitle("Add New User")
         self.setFixedSize(400, 320) # Sedikit lebih tinggi untuk spasi
+        
+        self.setWindowFlags(
+            Qt.Window | Qt.WindowTitleHint | Qt.WindowCloseButtonHint | Qt.WindowContextHelpButtonHint
+        ) # Tambahkan tombol bantuan
 
         layout = QVBoxLayout(self)
         layout.setSpacing(10) # Kurangi spacing sedikit
@@ -2599,13 +2603,33 @@ class AddUserDialog(QDialog):
             }
             QPushButton:hover { background-color: #D0D0D0; }
         """)
+        self.bulk_add_btn.setWhatsThis("Click to add multiple users from a file")
         self.bulk_add_btn.setToolTip("Add multiple users from a CSV or Excel file")
         self.bulk_add_btn.clicked.connect(self.handle_bulk_add_click) # Handler baru
-            
+
+        # Buat tombol bantuan custom kita
+        self.help_button = QPushButton("?")
+        self.help_button.setFixedSize(24, 24) # Ukuran kecil
+        self.help_button.setStyleSheet("""
+            QPushButton {
+                font-weight: bold;
+                border-radius: 12px; /* Membuatnya bulat */
+                background-color: #E0E0E0;
+                color: #555555;
+            }
+            QPushButton:hover {
+                background-color: #D0D0D0;
+            }
+        """)
+        self.help_button.setToolTip("Tampilkan bantuan untuk formulir ini")
+        # Langsung hubungkan klik ke fungsi bantuan
+        self.help_button.clicked.connect(self.show_help_message)
+
         # chat_header_layout = QHBoxLayout()
         # chat_header_layout.setContentsMargins(24, 15, 24, 20) 
 
         button_layout.addStretch()
+        button_layout.addWidget(self.help_button) # Tambahkan tombol bulk add
         button_layout.addWidget(self.bulk_add_btn) # Tambahkan tombol bulk add
         button_layout.addWidget(self.cancel_button)
         button_layout.addWidget(self.ok_button)
@@ -2621,7 +2645,23 @@ class AddUserDialog(QDialog):
             # sidebar_layout.addWidget(self.add_contact_btn)
 
                 # --- TAMBAHKAN KODE DI BAWAH INI ---
-        
+
+    # --- PERUBAHAN 3: Buat metode khusus untuk menampilkan pesan bantuan ---
+    def show_help_message(self):
+        """Menampilkan QMessageBox dengan teks bantuan."""
+        help_text = """
+        <b>Panduan Menambah User Baru</b>
+        <p>Formulir ini digunakan untuk mendaftarkan pengguna baru ke dalam sistem chat.</p>
+        <ul>
+            <li><b>Role:</b> Pilih peran untuk pengguna baru. 'Employee' adalah klien biasa, sedangkan 'Technician' dan 'GA' adalah staf pendukung.</li>
+            <li><b>Nomor Induk Pegawai:</b> Masukkan NIK atau username unik yang akan digunakan untuk login. Wajib diisi.</li>
+            <li><b>Full Name:</b> Masukkan nama lengkap pengguna yang akan ditampilkan di chat.</li>
+            <li><b>Password:</b> Wajib diisi untuk role 'Technician' dan 'GA'. Untuk 'Employee', kolom ini akan disembunyikan.</li>
+            <li><b>Bulk Add from File:</b> Digunakan untuk menambah banyak pengguna sekaligus dari sebuah file Excel atau CSV.</li>
+        </ul>
+        """
+        QMessageBox.information(self, "Bantuan - Tambah User", help_text)
+
         
 
     def handle_bulk_add_click(self):
