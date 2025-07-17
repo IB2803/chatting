@@ -1,12 +1,12 @@
+import threading
+import requests
+import socketio
+import socket
+import json
+import time
 import sys
 import os
-import requests
-import json
-import threading
-import time
-import socketio
 
-from PyQt5.QtWidgets import QFileDialog
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QListWidget, QTextEdit,
@@ -14,20 +14,78 @@ from PyQt5.QtWidgets import (
     QFileDialog, QMessageBox, QComboBox, QCheckBox
 )
 from PyQt5.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply # Untuk memuat gambar secara asinkron
-from PyQt5.QtCore import pyqtSignal, Qt, QTimer, QUrl, QMimeData, QDir, QStandardPaths, QSettings
+from PyQt5.QtCore import QSettings, pyqtSignal, Qt, QTimer, QUrl, QMimeData, QDir, QStandardPaths, QThread, QObject
 from PyQt5.QtGui import QColor,QKeyEvent, QFont, QPainter, QBrush, QPalette, QPixmap, QIcon, QDesktopServices, QImage
 
 
 # Suppress font warnings
 os.environ['QT_LOGGING_RULES'] = 'qt.qpa.fonts=false'
 
-IP = "192.168.47.72" 
+# IP = "192.168.47.72" 
 # IP = "192.168.1.7" 
-PORT = "5000"
+SERVER_IP = None
+SERVER_PORT = None
+BASE_URL = None
+DISCOVERY_PORT = 60000 # Port untuk discovery service
 
 # BASE_URL = "http://localhost:5000"
-BASE_URL = f"http://{IP}:{PORT}"   # Ganti <IP_KANTOR> dengan IP server
-# BASE_URL = "http://192.168.1.7:5000"  # Ganti <IP_KANTOR> dengan IP server
+# BASE_URL = f"http://{IP}:{PORT}"   # Ganti <IP_KANTOR> dengan IP server
+
+def find_server():
+    """
+    Mengirim broadcast UDP untuk menemukan server.
+    Mengembalikan tuple (ip, port) jika ditemukan, atau (None, None) jika gagal.
+    """
+    global SERVER_IP, SERVER_PORT, BASE_URL
+    print("Mencari server helpdesk di jaringan...")
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        s.settimeout(3) # Tunggu balasan selama 3 detik
+        try:
+            s.sendto(b'DISCOVER_ITHELPDESK_SERVER', ('<broadcast>', DISCOVERY_PORT))
+            data, addr = s.recvfrom(1024)
+            response_str = data.decode('utf-8')
+            if response_str.startswith('ITHELPDESK_SERVER_AT_PORT_'):
+                port = response_str.split('_')[-1]
+                SERVER_IP = addr[0]
+                SERVER_PORT = int(port)
+                BASE_URL = f"http://{SERVER_IP}:{SERVER_PORT}"
+                print(f"✅ Server ditemukan di: {BASE_URL}")
+                return SERVER_IP, SERVER_PORT
+        except socket.timeout:
+            print("❌ Tidak ada server yang merespons. Pencarian gagal.")
+            return None, None
+        except Exception as e:
+            print(f"Error saat mencari server: {e}")
+            return None, None
+    return None, None
+
+class ServerFinder(QObject):
+    finished = pyqtSignal(str, int)
+    not_found = pyqtSignal()
+    search_stopped = pyqtSignal() # Sinyal baru untuk menandakan pencarian selesai (baik berhasil atau gagal)
+
+    def __init__(self):
+        super().__init__()
+        self._running = True
+
+    def find_continuously(self):
+        """Mencari server terus menerus sampai ditemukan atau dihentikan."""
+        while self._running:
+            ip, port = find_server()
+            if ip and port:
+                self.finished.emit(ip, port)
+                self._running = False
+            else:
+                self.not_found.emit()
+                if self._running:
+                    QThread.sleep(5)
+        self.search_stopped.emit()
+
+    def stop(self):
+        self._running = False
+
+
 
 class FilePasteTextEdit(QTextEdit):
     def __init__(self, parent_chat_window, *args, **kwargs):
@@ -128,10 +186,8 @@ class WebSocketThread(threading.Thread):
     def __init__(self, chat_window):
         super().__init__()
         self.chat_window = chat_window
-        
         self.sio = socketio.Client(logger=True, engineio_logger=True)
         self.setup_event_handlers()
-        
         self.running = True
         
     def setup_event_handlers(self):
@@ -169,12 +225,11 @@ class WebSocketThread(threading.Thread):
                 
     def run(self):
         # MODIFIKASI DI SINI: Tambahkan /socket.io/ pada URL
-        print(f"DEBUG: WebSocketThread (python-socketio) - Mencoba terhubung ke http://{IP}:{PORT}")
         try:
             # Lakukan koneksi. Pustaka akan menangani handshake Engine.IO/Socket.IO.
             # Ia akan mencoba path default /socket.io/
             # 'transports=['websocket']' memaksa penggunaan WebSocket.
-            self.sio.connect(f"http://{IP}:{PORT}", transports=['websocket'])
+            self.sio.connect(BASE_URL, transports=['websocket'])
             
             # sio.wait() akan menjaga thread ini tetap aktif dan memproses event
             # sampai sio.disconnect() dipanggil atau koneksi terputus.
@@ -1107,11 +1162,17 @@ class LoginWindow(QWidget):
     def __init__(self):
         super().__init__()
         
-        self.settings = QSettings("MyCompany", "ITChat") 
-        self.saved_accounts = [] 
+        self.settings = QSettings("MyCompany", "ITHelpDesk(Client)") 
+        self.saved_accounts = []
+
+        self.search_thread = None
+        self.server_finder = None
+
         self.setup_ui()
         self.load_saved_accounts_to_combo()
         self.load_last_saved_nik()
+
+        self.start_new_search_thread()
     
     def setup_ui(self):
         self.setWindowTitle("Login - IT Chat (Client)")
@@ -1130,8 +1191,8 @@ class LoginWindow(QWidget):
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1, 
                     stop:0 #4A90E2, stop:0.5 #357ABD, stop:1 #6C7CE7);
             }
-        """)
-        
+        """)   
+
         top_layout = QVBoxLayout()
         top_layout.setContentsMargins(40, 40, 40, 40)
         top_layout.setSpacing(20)
@@ -1242,6 +1303,49 @@ class LoginWindow(QWidget):
         """)
         form_layout.addWidget(welcome_sub)
         
+        # 1. Buat QHBoxLayout untuk menampung label status dan tombol scan
+        status_layout = QHBoxLayout()
+        status_layout.setContentsMargins(0, 0, 0, 0) # Hapus margin internal
+
+        # 2. Buat label status seperti biasa
+        self.server_status_label = QLabel("🔍 Mencari server di jaringan...")
+        self.server_status_label.setAlignment(Qt.AlignCenter)
+        self.server_status_label.setStyleSheet("color: #7f8c8d; font-style: italic; margin-bottom: 10px;")
+        
+        # 3. Buat tombol scan
+        self.scan_button = QPushButton("Scan")
+        self.scan_button.setFixedSize(60, 28) # Atur ukuran agar pas
+        self.scan_button.setStyleSheet("""
+            QPushButton { 
+                font-size: 12px; 
+                color: #3498DB; 
+                background-color: transparent;
+                border: 1px solid #3498DB; 
+                border-radius: 14px; 
+                padding: 3px 8px; 
+            }
+            QPushButton:hover { background-color: #EAF3FF; }
+            QPushButton:pressed { background-color: #D4E6F1; }
+            QPushButton:disabled {
+                color: #BDC3C7;
+                border-color: #BDC3C7;
+                background-color: transparent;
+            }
+        """)
+        self.scan_button.setToolTip("Pindai ulang jaringan untuk mencari server")
+        # Hubungkan tombol ke fungsi yang memulai pencarian
+        self.scan_button.clicked.connect(self.start_new_search_thread)
+        
+        # 4. Tambahkan label dan tombol ke layout horizontal
+        status_layout.addStretch() # Pendorong agar konten ke tengah
+        status_layout.addWidget(self.server_status_label)
+        status_layout.addSpacing(10) # Jarak antara label dan tombol
+        status_layout.addWidget(self.scan_button)
+        status_layout.addStretch() # Pendorong agar konten ke tengah
+
+        # 5. Tambahkan layout horizontal ini ke form_layout utama
+        form_layout.addLayout(status_layout)
+        
         # Username input
         username_label = QLabel("NIK (nomor induk karyawan)")
         username_label.setStyleSheet("""
@@ -1271,40 +1375,10 @@ class LoginWindow(QWidget):
         """)
         form_layout.addWidget(self.username_input)
         
-        # Password input
-        # password_label = QLabel("Password")
-        # password_label.setStyleSheet("""
-        #     QLabel {
-        #         font-size: 14px;
-        #         color: #2C3E50;
-        #         font-weight: 500;
-        #         margin-bottom: 5px;
-        #     }
-        # """)
-        # form_layout.addWidget(password_label)
-        
-        # self.password_input = QLineEdit()
-        # self.password_input.setPlaceholderText("Enter your password")
-        # self.password_input.setEchoMode(QLineEdit.Password)
-        # self.password_input.setStyleSheet("""
-        #     QLineEdit {
-        #         padding: 16px;
-        #         font-size: 14px;
-        #         border: 2px solid #E8ECEF;
-        #         border-radius: 12px;
-        #         background-color: #F8F9FA;
-        #     }
-        #     QLineEdit:focus {
-        #         border: 2px solid #4A90E2;
-        #         background-color: #FFFFFF;
-        #     }
-        # """)
-        # form_layout.addWidget(self.password_input)
-        
         # Login button
-        login_btn = QPushButton("Sign In")
-        login_btn.clicked.connect(self.handle_login)
-        login_btn.setStyleSheet("""
+        self.login_btn = QPushButton("Sign In")
+        self.login_btn.clicked.connect(self.handle_login)
+        self.login_btn.setStyleSheet("""
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
                     stop:0 #4A90E2, stop:1 #357ABD);
@@ -1324,7 +1398,9 @@ class LoginWindow(QWidget):
                 background: #2E6DA4;
             }
         """)
-        form_layout.addWidget(login_btn)
+        self.login_btn.setEnabled(False)
+        self.login_btn.setToolTip("Mencari server di jaringan...")
+        form_layout.addWidget(self.login_btn)
         
         # Error label
         self.error_label = QLabel()
@@ -1368,6 +1444,71 @@ class LoginWindow(QWidget):
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             }
         """)
+
+    def start_new_search_thread(self):
+        """
+        Menghentikan thread lama (jika ada) dan memulai thread pencarian yang baru.
+        Inilah yang harus dipanggil oleh tombol "Scan".
+        """
+        # Hentikan dan bersihkan thread lama jika sedang berjalan
+        if self.search_thread and self.search_thread.isRunning():
+            self.server_finder.stop()
+            self.search_thread.quit()
+            self.search_thread.wait()
+
+        # Atur ulang UI ke status "Mencari"
+        self.server_status_label.setText("🔍 Mencari server di jaringan...")
+        self.server_status_label.setStyleSheet("color: #7f8c8d; font-style: italic;")
+        self.login_btn.setEnabled(False)
+        self.scan_button.setEnabled(False) # Nonaktifkan tombol scan selama pencarian
+        self.scan_button.setText("...")
+
+        # Buat instance QThread dan ServerFinder yang BARU
+        self.search_thread = QThread()
+        self.server_finder = ServerFinder()
+        self.server_finder.moveToThread(self.search_thread)
+
+        # Hubungkan sinyal
+        self.search_thread.started.connect(self.server_finder.find_continuously)
+        self.server_finder.finished.connect(self.on_server_found)
+        self.server_finder.not_found.connect(self.on_server_not_found)
+        
+        # Mulai thread baru
+        self.search_thread.start()
+
+    def on_server_found(self, ip, port):
+        # Update UI saat server ditemukan
+        self.server_status_label.setText(f"✅ Server ditemukan di {ip}:{port}")
+        self.server_status_label.setStyleSheet("color: #27ae60; font-weight: bold;")
+        self.login_btn.setToolTip("Klik untuk masuk ke server")
+        self.login_btn.setEnabled(True)
+        
+        # Aktifkan kembali tombol scan dan reset teksnya
+        self.scan_button.setEnabled(True)
+        self.scan_button.setText("Scan")
+
+        # Hentikan thread saat ini karena tugasnya sudah selesai
+        if self.search_thread.isRunning():
+            self.server_finder.stop()
+            self.search_thread.quit()
+            self.search_thread.wait()
+
+    def on_server_not_found(self):
+        # Update UI saat server TIDAK ditemukan dalam satu siklus pencarian
+        self.server_status_label.setText("❌ Server tidak ditemukan. Mencoba lagi...")
+        
+        # Aktifkan kembali tombol scan agar pengguna bisa mencoba manual jika mau
+        self.scan_button.setEnabled(True)
+        self.scan_button.setText("Scan")
+
+    def closeEvent(self, event):
+        # Pastikan thread dihentikan saat window ditutup
+        if self.search_thread and self.search_thread.isRunning():
+            self.server_finder.stop()
+            self.search_thread.quit()
+            self.search_thread.wait()
+        super().closeEvent(event)
+
     def load_saved_accounts_to_combo(self):
         self.accounts_combo.blockSignals(True)
         self.accounts_combo.clear()
@@ -1466,7 +1607,6 @@ class LoginWindow(QWidget):
         self.settings.sync()
         self.load_saved_accounts_to_combo()
 
-
     def clear_saved_accounts(self):
         reply = QMessageBox.question(self, "Clear Saved NIKs",
                                      "Are you sure you want to clear all saved NIKs?",
@@ -1477,34 +1617,7 @@ class LoginWindow(QWidget):
             self.load_saved_accounts_to_combo()
             self.username_input.clear()
             QMessageBox.information(self, "Cleared", "Saved NIKs have been cleared.")
-    # def handle_login(self):
-    #     username = self.username_input.text()
-    #     # password = self.password_input.text()
-        
-    #     if not username :
-    #         self.show_error("Username and password are required")
-    #         return
-        
-    #     data = {
-    #         'username': username,
-    #         # 'password': password
-    #     }
-        
-    #     try:
-    #         response = requests.post(f"{BASE_URL}/login", json=data)
-    #         if response.status_code == 200:
-    #             result = response.json()
-    #             if result['success']:
-    #                 self.chat_window = ChatWindow(result['user'])
-    #                 self.chat_window.show()
-    #                 self.close()
-    #             else:
-    #                 self.show_error("Invalid username or password. Please try again.")
-    #         else:
-    #             self.show_error("Server error occurred. Please try again later.")
-    #     except requests.exceptions.ConnectionError:
-    #         self.show_error("Cannot connect to server. Please check your connection.")
-    
+
     def show_error(self, message):
         self.error_label.setText(f"⚠️ {message}")
         self.error_label.show()
